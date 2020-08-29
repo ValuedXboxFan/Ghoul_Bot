@@ -1,0 +1,12 @@
+BOT_TOKEN = ''
+BOT_PREFIX = ("*", "!")
+
+DB_NAME = ''
+DB_HOST = ''
+DB_USER = ''
+DB_PASS = ''
+
+# Hardcoded channel IDs - probably want to get these dynamically eventually
+ch_general = int
+ch_test_channel = int
+ch_radio_room = int
