@@ -1,6 +1,6 @@
 Discord Ghoul Bot
 ====================
-Discord bot for Ghouls-Tober Discord Channel
+Discord bot for Ghouls-Tober Discord Server
 
 
 Glossary
