@@ -3,20 +3,6 @@ import requests
 import json
 from urllib.parse import quote
 
-'''
-search = 'The Last of us'
-
-headers = {'user-key': IGDB_KEY}
-data = 'search "%s"; fields name,id,first_release_date,summary;' % search
-r = requests.post('https://api-v3.igdb.com/games/', data=data, headers=headers)
-
-test = r.json()
-print(test[0]['name'])
-print(test[0]['id'])
-print(test[0]['first_release_date'])
-print(test[0]['summary'])
-'''
-
 
 class media():
 
