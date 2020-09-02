@@ -1,12 +1,28 @@
 BOT_TOKEN = ''
-BOT_PREFIX = ("*", "!")
+BOT_PREFIX = ("?", "!")
 
 DB_NAME = ''
 DB_HOST = ''
 DB_USER = ''
 DB_PASS = ''
 
+TMDB_KEY = ''
+IGDB_KEY = ''
+
 # Hardcoded channel IDs - probably want to get these dynamically eventually
-ch_general = int
-ch_test_channel = int
-ch_radio_room = int
+ch_general =
+ch_test_channel =
+ch_radio_room = 
+
+#Database legal info
+TV_SOURCE = 'TMDB'
+TV_SOURCE_LEGAL = 'This service uses the TMDb API but is not endorsed or certified by TMDb.'
+TV_SOURCE_LOGO = 'https://cdn-images-1.medium.com/max/1200/1*vIR7iO-1GnY2xYxL6NiYkw.png'
+
+MOVIE_SOURCE = 'TMDB'
+MOVIE_SOURCE_LEGAL = 'This service uses the TMDb API but is not endorsed or certified by TMDb.'
+MOVIE_SOURCE_LOGO = 'https://cdn-images-1.medium.com/max/1200/1*vIR7iO-1GnY2xYxL6NiYkw.png'
+
+VG_SOURCE = 'IGDB'
+VG_SOURCE_LEGAL = 'This service uses the IGDB API but is not endorsed or certified by IGDB.'
+VG_SOURCE_LOGO = 'https://cdn-images-1.medium.com/max/1200/1*vIR7iO-1GnY2xYxL6NiYkw.png'

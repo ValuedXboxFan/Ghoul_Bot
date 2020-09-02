@@ -1,12 +1,12 @@
 import pymysql.cursors
 from settings import *
+from media_get import media
 
 import random
 import asyncio
 import aiohttp
 import json
-from discord import Game, utils
-#from discord import utils
+from discord import Game, utils, Embed
 from discord.ext.commands import Bot
 
 
@@ -19,7 +19,7 @@ def connect_db():
                                  charset='utf8mb4',
                                  cursorclass=pymysql.cursors.DictCursor)
 
-    print('* Connected to %s' % DB_NAME)
+    print(f'* Connected to {DB_NAME}')
     return connection
 
 
@@ -31,6 +31,7 @@ class GhoulBot():
         self.token = token
         self.prepare_client()
 
+
     def prepare_client(self):
 
 
@@ -38,7 +39,7 @@ class GhoulBot():
         async def on_ready():
             await self.bot.change_presence()
             self.add_all_members_to_db()
-            print("* Connected to Discord as " + self.bot.user.name)
+            print(f'* Connected to Discord as {self.bot.user.name}')
 
 
         # Watch for new server members and add them to db
@@ -53,7 +54,7 @@ class GhoulBot():
             if context.message.channel.id == ch_test_channel:
                 await context.send('Success! You\'re in the right place.' )
             else:
-                await context.send('Failure! You can only use this command in %s' % self.bot.get_channel(ch_test_channel))
+                await context.send('Failure! You can only use this command in the Test-Channel channel')
 
 
         # Channel gated ping command for general channel
@@ -62,7 +63,7 @@ class GhoulBot():
             if context.message.channel.id == ch_general:
                 await context.send('Success! You\'re in the right place.' )
             else:
-                await context.send('Failure! You can only use this command in the %s channel' % self.bot.get_channel(ch_general))
+                await context.send('Failure! You can only use this command in the General channel')
 
 
 
@@ -86,6 +87,44 @@ class GhoulBot():
             else:
                 await context.send('That channel doesn\'t exist.')
 
+        @self.bot.command(name='movie')
+        async def movie(context, *args):
+            if args[-1][:2] == '--':
+                try:
+                    movie = media(media_type='movie', title=' '.join(args[:-1]), year=args[-1][2:])
+                except:
+                    await context.send('No results')
+                    return
+            else:
+                try:
+                    movie = media(media_type='movie', title=' '.join(args))
+                except:
+                    await context.send('No results')
+                    return
+            await context.send(embed=self.build_media_embed(movie))
+
+
+        @self.bot.command(name='tvshow')
+        async def tv_show(context, *args):
+            if args[-1][:2] == '--':
+                try:
+                    tv_show = media(media_type='tv_show', title=' '.join(args[:-1]), year=args[-1][2:])
+                except:
+                    await context.send('No results')
+                    return
+            else:
+                try:
+                    tv_show = media(media_type='tv_show', title=' '.join(args))
+                except:
+                    await context.send('No results')
+                    return
+            await context.send(embed=self.build_media_embed(tv_show))
+
+
+        @self.bot.command(name='videogame')
+        async def video_game(context, *args):
+            video_game = media(media_type='video_game', title=' '.join(args))
+            await context.send(embed=self.build_media_embed(video_game))
 
 
     # Ensure existing members are stored in db
@@ -98,15 +137,14 @@ class GhoulBot():
     def add_member_to_db(self, member):
         if self.get_user(member.id):
             return
-
         try:
             with self.db.cursor() as cursor:
-                sql = "INSERT INTO `gt_users` (`member_id`, `server_join_date`, `points`) VALUES (%s, %s, %s)"
-                cursor.execute(sql, (member.id, member.joined_at, 0))
+                sql = "INSERT INTO `gt_users` (`member_id`, `server_join_date`, `points`) VALUES ({0}, {1}, {2})"
+                cursor.execute(sql.format(member.id, member.joined_at, 0))
             self.db.commit()
-            print("Added %s to database" % member.id)
+            print(f'Added {member.id} to database')
         except Exception as e:
-            print ("Error adding member: %s" % e)
+            print (f'Error adding member: {e}')
 
 
     # Get user by member ID
@@ -114,15 +152,15 @@ class GhoulBot():
         try:
             with self.db.cursor() as cursor:
                 # Read a single record
-                sql = "SELECT `member_id`,`server_join_date`,`points` FROM `gt_users` WHERE `member_id`=%s"
-                cursor.execute(sql, (member_id,))
+                sql = "SELECT `member_id`,`server_join_date`,`points` FROM `gt_users` WHERE `member_id`={}"
+                cursor.execute(sql.format(member_id))
                 result = cursor.fetchone()
                 if not result:
-                    print ("User does not exist: %s" % member_id)
+                    print (f'User does not exist: {member_id}')
                 else:
                     return result
         except Exception as e:
-            print('Error looking up userid %s.\n%s' % (member_id, e))
+            print(f'- Error looking up userid {member_id}.\n{e}')
 
 
     # Update user points
@@ -130,14 +168,38 @@ class GhoulBot():
         member_info = self.get_user(member.id)
         with self.db.cursor() as cursor:
             try:
-                sql = "UPDATE gt_users SET points=%s WHERE member_id=%s"
-                point_total = member_info['points'] + points
-                cursor.execute(sql, (point_total, member.id))
+                point_total = member_info["points"] + points
+                sql = "UPDATE gt_users SET points={0} WHERE member_id={1}"
+                cursor.execute(sql.format(point_total, member.id))
                 self.db.commit()
-                print("* Updated user %s points from %s to %s." %
-                      (member.name, member_info['points'], point_total))
+                print(f'* Updated user {member.name} points from {member_info["points"]} to {point_total}.')
             except Exception as e:
-                print("- Error updating points for %s: .\n%s" % (member.name, e))
+                print(f'- Error updating points for {member.name}: .\n{e}')
+
+
+    # Build media Embed
+    def build_media_embed(self, media_item):
+        if media_item.media_type == 'movie':
+            embed_color = 0x00ff00
+
+        if media_item.media_type == 'video_game':
+            embed_color = 0x0000ff
+
+        if media_item.media_type == 'tv_show':
+            embed_color = 0xff0000
+
+        embed = Embed(color=embed_color)
+        embed.title = media_item.title
+        embed.set_footer(text=media_item.source_legal)
+        embed.set_author(name=media_item.source, icon_url=media_item.source_logo)
+        if media_item.overview:
+            embed.add_field(name='Overview:', value=media_item.overview, inline=False)
+        if media_item.release_date:
+            embed.add_field(name='Release Date:', value=media_item.release_date, inline=True)
+        if media_item.img:
+            embed.set_image(url=media_item.img)
+            print(media_item.img)
+        return embed
 
 
     def run(self):
