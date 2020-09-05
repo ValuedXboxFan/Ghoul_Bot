@@ -1,6 +1,6 @@
-import pymysql.cursors
 from settings import *
 from media_get import media
+from db_functions import *
 
 import os
 import asyncio
@@ -12,19 +12,6 @@ from discord.ext.commands import *
 
 
 
-# Connet to db
-def connect_db():
-    connection = pymysql.connect(host=DB_HOST,
-                                 user=DB_USER,
-                                 password=DB_PASS,
-                                 db=DB_NAME,
-                                 charset='utf8mb4',
-                                 cursorclass=pymysql.cursors.DictCursor)
-
-    print(f'* Connected to {DB_NAME}')
-    return connection
-
-
 class GhoulBot():
 
     def __init__(self, token):
@@ -32,14 +19,6 @@ class GhoulBot():
         self.bot = Bot(command_prefix=BOT_PREFIX)
         self.token = token
         self.prepare_client()
-        self.setup()
-
-
-    def setup(self):
-        for filename in os.listdir('./cogs'):
-            if filename.endswith('.py'):
-                self.bot.load_extension(f'cogs.{filename[:-3]}')
-                print(f'{filename} cog loaded)')
 
 
     def prepare_client(self):
@@ -48,14 +27,15 @@ class GhoulBot():
         @self.bot.event
         async def on_ready():
             await self.bot.change_presence()
-            self.add_all_members_to_db()
+            print(self.db)
+            add_all_members_to_db(self)
             print(f'* Connected to Discord as {self.bot.user.name}')
 
 
         # Watch for new server members and add them to db
         @self.bot.event
         async def on_member_join(member):
-            self.add_member_to_db(member)
+            add_member_to_db(self ,member)
 
 
         # Channel gated ping command for test-channel channel (must have test role)
@@ -160,57 +140,7 @@ class GhoulBot():
             except Exception as e:
                 await context.send('Please pass a number as an argument')
                 pass
-            self.update_points(context.message.author, point_change)
-
-
-    # Ensure existing members are stored in db
-    def add_all_members_to_db(self):
-        for member in self.bot.get_all_members():
-            self.add_member_to_db(member)
-
-
-    # Add member to db
-    def add_member_to_db(self, member):
-        if self.get_user(member.id):
-            return
-        try:
-            with self.db.cursor() as cursor:
-                sql = "INSERT INTO `gt_users` (`member_id`, `server_join_date`, `points`) VALUES (%s, %s, %s)"
-                cursor.execute(sql, (member.id, member.joined_at, 0))
-            self.db.commit()
-            print(f'Added {member.id} to database')
-        except Exception as e:
-            print (f'Error adding member: {e}')
-
-
-    # Get user by member ID
-    def get_user(self, member_id):
-        try:
-            with self.db.cursor() as cursor:
-                # Read a single record
-                sql = "SELECT `member_id`,`server_join_date`,`points` FROM `gt_users` WHERE `member_id`=%s"
-                cursor.execute(sql, (member_id))
-                result = cursor.fetchone()
-                if not result:
-                    print (f'User does not exist: {member_id}')
-                else:
-                    return result
-        except Exception as e:
-            print(f'- Error looking up userid {member_id}.\n{e}')
-
-
-    # Update user points
-    def update_points(self, member, points):
-        member_info = self.get_user(member.id)
-        with self.db.cursor() as cursor:
-            try:
-                point_total = member_info["points"] + points
-                sql = "UPDATE gt_users SET points=%s WHERE member_id=%s"
-                cursor.execute(sql, (point_total, member.id))
-                self.db.commit()
-                print(f'* Updated user {member.name} points from {member_info["points"]} to {point_total}.')
-            except Exception as e:
-                print(f'- Error updating points for {member.name}: .\n{e}')
+            update_points(self, context.message.author, point_change)
 
 
     # Build media Embed
