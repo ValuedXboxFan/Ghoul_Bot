@@ -2,12 +2,14 @@ import pymysql.cursors
 from settings import *
 from media_get import media
 
-import random
+import os
 import asyncio
 import aiohttp
 import json
+from custom_checks import *
 from discord import Game, utils, Embed
-from discord.ext.commands import Bot
+from discord.ext.commands import *
+
 
 
 # Connet to db
@@ -30,11 +32,19 @@ class GhoulBot():
         self.bot = Bot(command_prefix=BOT_PREFIX)
         self.token = token
         self.prepare_client()
+        self.setup()
+
+
+    def setup(self):
+        for filename in os.listdir('./cogs'):
+            if filename.endswith('.py'):
+                self.bot.load_extension(f'cogs.{filename[:-3]}')
+                print(f'{filename} cog loaded)')
 
 
     def prepare_client(self):
 
-
+        # Set bot status and reiniitialize database
         @self.bot.event
         async def on_ready():
             await self.bot.change_presence()
@@ -48,45 +58,58 @@ class GhoulBot():
             self.add_member_to_db(member)
 
 
-        # Channel gated ping command for test-channel channel
+        # Channel gated ping command for test-channel channel (must have test role)
         @self.bot.command(name='testchannel-ping')
+        @channel_allow(ch_test_channel)
+        @has_role(rl_test_role)
         async def testchannel_ping(context):
-            if context.message.channel.id == ch_test_channel:
-                await context.send('Success! You\'re in the right place.' )
-            else:
-                await context.send('Failure! You can only use this command in the Test-Channel channel')
+            await context.send('Success! You\'re in the right place.' )
+
+        @testchannel_ping.error
+        async def testchannel_ping_error(context, error):
+            if isinstance(error, commands.CheckFailure):
+                await context.send('nothing to see here.')
 
 
         # Channel gated ping command for general channel
         @self.bot.command(name='general-ping')
+        @channel_allow(ch_general)
         async def general_ping(context):
-            if context.message.channel.id == ch_general:
-                await context.send('Success! You\'re in the right place.' )
-            else:
-                await context.send('Failure! You can only use this command in the General channel')
+            await context.send('Success! You\'re in the right place.' )
+
+        @general_ping.error
+        async def general_ping_error(context, error):
+            if isinstance(error, commands.CheckFailure):
+                await context.send('nothing to see here.')
 
 
+        # Channel gated ping command for test-channel AND general channels
+        @self.bot.command(name='test-ping')
+        @channel_restrict(ch_general, ch_test_channel)
+        async def test_ping(context):
+            await context.send('Success! You\'re in the right place.' )
 
-        # Add/remove points from user
-        @self.bot.command(name='gimmepoints')
-        async def gimmepoints(context, arg):
-            try:
-                point_change = int(arg)
-            except Exception as e:
-                await context.send('Please pass a number as an argument')
-                pass
-            self.update_points(context.message.author, point_change)
+        @test_ping.error
+        async def testchannel_ping_error(context, error):
+            if isinstance(error, commands.CheckFailure):
+                await context.send('nothing to see here.')
 
 
-        # Phil's message dumbwaiter
-        @self.bot.command(name='msgch')
-        async def message_channel(context, channel_name, *, msg):
-            channel = utils.get(self.bot.get_all_channels(), name=channel_name)
-            if channel:
-                await channel.send(msg)
-            else:
-                await context.send('That channel doesn\'t exist.')
+        # DM only command
+        @self.bot.command(name='test-dm')
+        @dm_only()
+        async def test_dm(context):
+            await context.send('Success! You\'re in the right place.' )
 
+
+        # Announce to other channels
+        @self.bot.command(name='announce')
+        async def announce(context, channel, *, args):
+            channel = context.message.channel_mentions[0]
+            await channel.send(args)
+
+
+        # Movie lookup
         @self.bot.command(name='movie')
         async def movie(context, *args):
             if args[-1][:2] == '--':
@@ -104,6 +127,7 @@ class GhoulBot():
             await context.send(embed=self.build_media_embed(movie))
 
 
+        # TV show lookup
         @self.bot.command(name='tvshow')
         async def tv_show(context, *args):
             if args[-1][:2] == '--':
@@ -121,10 +145,22 @@ class GhoulBot():
             await context.send(embed=self.build_media_embed(tv_show))
 
 
+        # Video game lookup
         @self.bot.command(name='videogame')
         async def video_game(context, *args):
             video_game = media(media_type='video_game', title=' '.join(args))
             await context.send(embed=self.build_media_embed(video_game))
+
+
+        # Manually Add/remove points from user
+        @self.bot.command(name='gimmepoints')
+        async def gimmepoints(context, arg):
+            try:
+                point_change = int(arg)
+            except Exception as e:
+                await context.send('Please pass a number as an argument')
+                pass
+            self.update_points(context.message.author, point_change)
 
 
     # Ensure existing members are stored in db
@@ -139,8 +175,8 @@ class GhoulBot():
             return
         try:
             with self.db.cursor() as cursor:
-                sql = "INSERT INTO `gt_users` (`member_id`, `server_join_date`, `points`) VALUES ({0}, {1}, {2})"
-                cursor.execute(sql.format(member.id, member.joined_at, 0))
+                sql = "INSERT INTO `gt_users` (`member_id`, `server_join_date`, `points`) VALUES (%s, %s, %s)"
+                cursor.execute(sql, (member.id, member.joined_at, 0))
             self.db.commit()
             print(f'Added {member.id} to database')
         except Exception as e:
@@ -152,8 +188,8 @@ class GhoulBot():
         try:
             with self.db.cursor() as cursor:
                 # Read a single record
-                sql = "SELECT `member_id`,`server_join_date`,`points` FROM `gt_users` WHERE `member_id`={}"
-                cursor.execute(sql.format(member_id))
+                sql = "SELECT `member_id`,`server_join_date`,`points` FROM `gt_users` WHERE `member_id`=%s"
+                cursor.execute(sql, (member_id))
                 result = cursor.fetchone()
                 if not result:
                     print (f'User does not exist: {member_id}')
@@ -169,8 +205,8 @@ class GhoulBot():
         with self.db.cursor() as cursor:
             try:
                 point_total = member_info["points"] + points
-                sql = "UPDATE gt_users SET points={0} WHERE member_id={1}"
-                cursor.execute(sql.format(point_total, member.id))
+                sql = "UPDATE gt_users SET points=%s WHERE member_id=%s"
+                cursor.execute(sql, (point_total, member.id))
                 self.db.commit()
                 print(f'* Updated user {member.name} points from {member_info["points"]} to {point_total}.')
             except Exception as e:
@@ -198,7 +234,6 @@ class GhoulBot():
             embed.add_field(name='Release Date:', value=media_item.release_date, inline=True)
         if media_item.img:
             embed.set_image(url=media_item.img)
-            print(media_item.img)
         return embed
 
 

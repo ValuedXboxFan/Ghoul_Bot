@@ -1,6 +1,7 @@
 from settings import *
 import requests
 import json
+import datetime
 from urllib.parse import quote
 
 
@@ -57,7 +58,7 @@ class media():
                 record = response.json()
             self.title = record[self.q_i]["name"]
             self.id = int(record[self.q_i]["id"])
-            self.release_date = record[self.q_i]["first_release_date"]
+            self.release_date = datetime.datetime.fromtimestamp(record[self.q_i]["first_release_date"]).strftime('%Y-%m-%d')
             self.overview = record[self.q_i]["summary"]
             self.img = f'https://images.igdb.com/igdb/image/upload/t_cover_big/{record[self.q_i]["cover"]["image_id"]}.jpg'
             print(self.img)
