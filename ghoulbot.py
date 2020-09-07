@@ -1,6 +1,6 @@
 from settings import *
-from media_get import media
-from db_functions import *
+from media import media
+from ghouldb import db_connection
 
 import os
 import asyncio
@@ -15,7 +15,7 @@ from discord.ext.commands import *
 class GhoulBot():
 
     def __init__(self, token):
-        self.db = connect_db()
+        self.db = db_connection(host=DB_HOST, user=DB_USER, password=DB_PASS, db=DB_NAME)
         self.bot = Bot(command_prefix=BOT_PREFIX)
         self.token = token
         self.prepare_client()
@@ -28,14 +28,14 @@ class GhoulBot():
         async def on_ready():
             await self.bot.change_presence()
             print(self.db)
-            add_all_members_to_db(self)
+            self.db.add_all_members_to_db(self.bot.get_all_members())
             print(f'* Connected to Discord as {self.bot.user.name}')
 
 
         # Watch for new server members and add them to db
         @self.bot.event
         async def on_member_join(member):
-            add_member_to_db(self ,member)
+            self.db.add_member_to_db(member)
 
 
         # Channel gated ping command for test-channel channel (must have test role)
@@ -140,7 +140,7 @@ class GhoulBot():
             except Exception as e:
                 await context.send('Please pass a number as an argument')
                 pass
-            update_points(self, context.message.author, point_change)
+            self.db.update_points(context.message.author, point_change)
 
 
     # Build media Embed
