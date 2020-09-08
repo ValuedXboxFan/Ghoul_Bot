@@ -128,7 +128,25 @@ class GhoulBot():
         # Video game lookup
         @self.bot.command(name='videogame')
         async def video_game(context, *args):
-            video_game = media(media_type='video_game', title=' '.join(args))
+            print(args)
+            year=None
+            i=0
+            search = list(args)
+            for arg in list(search):
+                if arg[:2] == 'y:':
+                    try:
+                        int(arg[2:])
+                        year = (arg[2:])
+                        search.remove(arg)
+                    except:
+                        await context.send('\'year\' must be an integer')
+                if arg[:2] == 'i:':
+                    try:
+                        i=(int(arg[2:])-1)
+                        search.remove(arg)
+                    except Exception as e:
+                        await context.send(f'\'i\' must be an integer: {e}')
+            video_game = media(media_type='video_game', title=' '.join(search), year=year, i=i)
             await context.send(embed=self.build_media_embed(video_game))
 
 

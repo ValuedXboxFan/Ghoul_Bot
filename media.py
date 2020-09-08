@@ -7,7 +7,7 @@ from urllib.parse import quote
 
 class media():
 
-    def __init__(self, i=0, media_type='', title='', year=int()):
+    def __init__(self, i=int(), media_type='', title='', year=int()):
         self.media_type = media_type
         self.q_title = title
         self.q_year = year
@@ -46,8 +46,17 @@ class media():
         self.source_legal = VG_SOURCE_LEGAL
         self.source_logo = VG_SOURCE_LOGO
 
+        q_year_ftd = ''
+
+        if self.q_year:
+            q_year_ftd = (f' &  release_dates.y = {str(self.q_year)}')
+
+        #q_platforms_ftd = (f' & platforms = {q_platform}')
+        #q_company_ftd = (f' & involved_companies = {q_company}')
+
+        print(q_year_ftd)
         headers = {'user-key': IGDB_KEY}
-        data = (f'search "{self.q_title}"; fields name,id,first_release_date,summary,cover.*; where version_parent = null; limit 5;')
+        data = (f'search "{self.q_title}"; fields name,id,first_release_date,summary,cover.*; where version_parent = null{q_year_ftd}; limit 5;')
 
         try:
             if self.q_year:
