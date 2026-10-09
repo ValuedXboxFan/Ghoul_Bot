@@ -9,4 +9,3 @@ app = FastAPI(title="Media Club", version="0.1.0")
 async def health() -> dict[str, str]:
     """Return process health for Railway and deployment checks."""
     return {"status": "ok", "environment": settings.app_env}
-
