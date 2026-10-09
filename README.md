@@ -65,6 +65,19 @@ pytest
 
 The health endpoint is available at `http://127.0.0.1:8000/health`.
 
+The readiness endpoint at `http://127.0.0.1:8000/ready` reports PostgreSQL and
+Discord connectivity. It returns HTTP 503 until both dependencies are connected.
+
+## First functional commands
+
+The staging bot registers commands directly to `DISCORD_GUILD_ID`, so they appear
+immediately without waiting for global command propagation:
+
+- `/ping` confirms the Gateway connection and displays latency.
+- `/status` reports the active environment and PostgreSQL connectivity.
+
+Database migrations run automatically before the web service starts.
+
 ## Railway layout
 
 Use one Railway project with two environments:

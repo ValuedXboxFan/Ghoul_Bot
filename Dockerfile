@@ -8,12 +8,13 @@ WORKDIR /app
 
 RUN addgroup --system app && adduser --system --ingroup app app
 
-COPY pyproject.toml README.md ./
+COPY pyproject.toml README.md alembic.ini ./
+COPY migrations ./migrations
 COPY src ./src
 
 RUN pip install --upgrade pip && pip install .
 
 USER app
 
-CMD ["sh", "-c", "uvicorn media_club.app:app --host 0.0.0.0 --port ${PORT:-8000}"]
+CMD ["sh", "-c", "alembic upgrade head && uvicorn media_club.app:app --host 0.0.0.0 --port ${PORT:-8000}"]
 
