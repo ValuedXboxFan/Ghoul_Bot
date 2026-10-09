@@ -1,0 +1,45 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "media-club-bot"
+version = "0.1.0"
+description = "Discord bot and web application for a private media club"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "discord.py>=2.6,<3",
+    "fastapi>=0.118,<1",
+    "pydantic-settings>=2.10,<3",
+    "uvicorn[standard]>=0.37,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "httpx>=0.28,<1",
+    "mypy>=1.18,<2",
+    "pytest>=8.4,<9",
+    "pytest-cov>=7,<8",
+    "ruff>=0.14,<1",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/media_club"]
+
+[tool.pytest.ini_options]
+addopts = "--strict-markers --cov=media_club --cov-report=term-missing"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+packages = ["media_club"]
+
