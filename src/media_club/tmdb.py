@@ -51,14 +51,12 @@ class TmdbClient:
         region: str = "US",
         http_client: httpx.AsyncClient | None = None,
     ) -> None:
+        self.access_token = access_token
         self.language = language
         self.region = region
         self.http = http_client or httpx.AsyncClient(
             base_url=TMDB_API_URL,
-            headers={
-                "Authorization": f"Bearer {access_token}",
-                "Accept": "application/json",
-            },
+            headers={"Accept": "application/json"},
             timeout=10.0,
         )
 
@@ -71,6 +69,7 @@ class TmdbClient:
         try:
             response = await self.http.get(
                 "/search/movie",
+                headers={"Authorization": f"Bearer {self.access_token}"},
                 params={
                     "query": clean_query,
                     "language": self.language,
@@ -98,6 +97,18 @@ class TmdbClient:
             if len(movies) >= limit:
                 break
         return movies
+
+    async def download_poster(self, movie: TmdbMovie) -> bytes | None:
+        """Download poster artwork for upload to Discord."""
+        if movie.poster_url is None:
+            return None
+
+        try:
+            response = await self.http.get(movie.poster_url)
+            response.raise_for_status()
+        except httpx.HTTPError as error:
+            raise TmdbError("TMDB poster download failed") from error
+        return response.content
 
     async def close(self) -> None:
         """Close the underlying HTTP connection pool."""
