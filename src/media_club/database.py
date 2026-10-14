@@ -26,7 +26,9 @@ class Database:
             async_database_url(url),
             pool_pre_ping=True,
         )
-        self.sessions = async_sessionmaker(self.engine, expire_on_commit=False, class_=AsyncSession)
+        self.sessions: async_sessionmaker[AsyncSession] = async_sessionmaker(
+            self.engine, expire_on_commit=False, class_=AsyncSession
+        )
 
     async def ping(self) -> bool:
         """Check that PostgreSQL accepts a simple query."""

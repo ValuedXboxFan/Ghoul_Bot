@@ -68,24 +68,27 @@ The health endpoint is available at `http://127.0.0.1:8000/health`.
 The readiness endpoint at `http://127.0.0.1:8000/ready` reports PostgreSQL and
 Discord connectivity. It returns HTTP 503 until both dependencies are connected.
 
-## First functional commands
+## Discord commands
 
 The staging bot registers commands directly to `DISCORD_GUILD_ID`, so they appear
 immediately without waiting for global command propagation:
 
 - `/ping` confirms the Gateway connection and displays latency.
 - `/status` reports the active environment and PostgreSQL connectivity.
-- `/movie search` searches TMDB, presents an interactive picker, saves the selected
-  movie, and displays its poster and overview.
-- `/movie post` collects a review and rating, then creates a bot-authored forum post
-  with the normalized title, Movies tag, reviewer attribution, and poster attachment.
-- `/movie attach` is used inside a member-authored forum post. It normalizes the thread
-  title, applies the Movies tag, and adds the selected poster as a bot reply.
+- `/log movie` searches TMDB and always includes an **Enter manually** fallback.
+- `/log tv_show`, `/log book`, `/log comic`, `/log podcast`, `/log music`,
+  `/log video_game`, and `/log other` collect a title and optional artwork manually.
+- Every log can include an optional review, strict 1–5 half-step rating, and optional
+  activity date. Members can save a private history record without creating a forum post.
+- `/edit` and `/delete` operate only inside a registered forum post and only for its
+  registered owner.
+- `/logs` privately manages history records that do not have a forum post.
 
-Set `DISCORD_MOVIE_FORUM_CHANNEL_ID` to the target forum channel ID. The bot looks for
-the `Movies` tag by default; override its name with `DISCORD_MOVIE_TAG_NAME` if needed.
-The bot needs permission to send messages, attach files, embed links, and manage threads
-in that forum.
+Set `DISCORD_MEDIA_FORUM_CHANNEL_ID` to the target forum channel ID. The legacy
+`DISCORD_MOVIE_FORUM_CHANNEL_ID` variable also remains supported. Create these forum
+tags exactly as written: `Movies`, `TV Shows`, `Books`, `Comics`, `Podcasts`, `Music`,
+`Video Games`, and `Other`. The bot needs permission to send messages, attach files,
+embed links, and manage threads in that forum.
 
 Database migrations run automatically before the web service starts.
 
