@@ -86,7 +86,10 @@ class GhoulBot(discord.Client):
 
         @self.tree.command(name="log", description="Log media you've experienced")
         @app_commands.guilds(self.guild)
-        @app_commands.describe(media_type="What kind of media are you logging?")
+        @app_commands.describe(
+            media_type="What kind of media are you logging?",
+            title="Title or search text",
+        )
         @app_commands.choices(
             media_type=[
                 app_commands.Choice(name=definition.tag_name, value=key)
@@ -96,18 +99,24 @@ class GhoulBot(discord.Client):
         async def log(
             interaction: discord.Interaction,
             media_type: app_commands.Choice[str],
+            title: app_commands.Range[str, 1, 100],
         ) -> None:
+            clean_title = title.strip()
             media_kind = cast(MediaKind, media_type.value)
             if media_kind == "movie":
                 await interaction.response.send_message(
                     "How would you like to add this movie?",
-                    view=MovieLogStartView(interaction.user.id, self.log_dependencies),
+                    view=MovieLogStartView(
+                        interaction.user.id,
+                        clean_title,
+                        self.log_dependencies,
+                    ),
                     ephemeral=True,
                 )
                 return
             await interaction.response.send_modal(
                 ManualMediaModal(
-                    MediaDraft(kind=media_kind, title=""),
+                    MediaDraft(kind=media_kind, title=clean_title),
                     self.log_dependencies,
                 )
             )

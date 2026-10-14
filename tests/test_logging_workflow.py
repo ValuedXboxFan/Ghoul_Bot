@@ -1,6 +1,7 @@
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from typing import cast
+from zoneinfo import ZoneInfo
 
 import discord
 import pytest
@@ -12,7 +13,8 @@ from media_club.log_ui import (
     LogDetailsModal,
     ManualMediaModal,
     MovieSearchModal,
-    parse_activity_date_parts,
+    default_activity_date,
+    parse_activity_date,
     rating_options,
 )
 from media_club.logging_workflow import (
@@ -38,14 +40,24 @@ class FakeUser:
 
 
 def test_optional_date_is_not_defaulted() -> None:
-    assert parse_activity_date_parts("", "", "") is None
-    assert parse_activity_date_parts("10", "14", "2026") == date(2026, 10, 14)
+    assert parse_activity_date("") is None
+    assert parse_activity_date("10/14/2026") == date(2026, 10, 14)
+    assert parse_activity_date("1/4/26") == date(2026, 1, 4)
+    assert parse_activity_date("12/31/99") == date(1999, 12, 31)
     with pytest.raises(ValueError):
-        parse_activity_date_parts("10", "", "2026")
+        parse_activity_date("10-14-2026")
     with pytest.raises(ValueError):
-        parse_activity_date_parts("2", "30", "2026")
+        parse_activity_date("2/30/2026")
     with pytest.raises(ValueError):
-        parse_activity_date_parts("10", "14", "26")
+        parse_activity_date("010/14/2026")
+
+
+def test_activity_day_changes_at_four_am_chicago_time() -> None:
+    chicago = ZoneInfo("America/Chicago")
+    assert default_activity_date(datetime(2026, 10, 15, 3, 59, tzinfo=chicago)) == date(
+        2026, 10, 14
+    )
+    assert default_activity_date(datetime(2026, 10, 15, 4, 0, tzinfo=chicago)) == date(2026, 10, 15)
 
 
 def test_rating_options_are_strict_half_steps() -> None:
@@ -113,7 +125,7 @@ def test_modal_layouts_and_command_tree_construct() -> None:
 
     assert len(MovieSearchModal(dependencies).to_components()) == 1
     assert len(ManualMediaModal(draft, dependencies).to_components()) == 2
-    assert len(LogDetailsModal(draft, dependencies).to_components()) == 5
+    assert len(LogDetailsModal(draft, dependencies).to_components()) == 4
 
     bot = GhoulBot(
         Settings(discord_application_id=1, discord_guild_id=2),
@@ -125,7 +137,8 @@ def test_modal_layouts_and_command_tree_construct() -> None:
     assert command_names == {"ping", "status", "about", "log", "edit", "delete", "logs"}
     log_command = next(command for command in commands if command.name == "log")
     assert isinstance(log_command, discord.app_commands.Command)
-    assert [parameter.name for parameter in log_command.parameters] == ["media_type"]
+    assert [parameter.name for parameter in log_command.parameters] == ["media_type", "title"]
+    assert all(parameter.required for parameter in log_command.parameters)
     assert {choice.name for choice in log_command.parameters[0].choices} == {
         "Movies",
         "TV Shows",

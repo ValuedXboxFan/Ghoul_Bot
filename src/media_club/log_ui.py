@@ -3,8 +3,9 @@ from __future__ import annotations
 import logging
 from contextlib import suppress
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, timedelta
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 import discord
 from sqlalchemy.exc import SQLAlchemyError
@@ -24,6 +25,7 @@ from media_club.tmdb import TMDB_IMAGE_URL, TmdbClient, TmdbError, TmdbMovie
 logger = logging.getLogger(__name__)
 
 RATINGS = tuple(Decimal(value) / 2 for value in range(2, 11))
+ACTIVITY_TIMEZONE = ZoneInfo("America/Chicago")
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,19 +56,32 @@ def rating_options(selected: Decimal | None = None) -> list[discord.SelectOption
     ]
 
 
-def parse_activity_date_parts(month: str, day: str, year: str) -> date | None:
-    """Validate separate numeric date fields, allowing a wholly blank date."""
-    parts = tuple(value.strip() for value in (month, day, year))
-    if not any(parts):
+def default_activity_date(now: datetime | None = None) -> date:
+    """Return the server's activity day, whose boundary is 4 AM Chicago time."""
+    local_now = now.astimezone(ACTIVITY_TIMEZONE) if now else datetime.now(ACTIVITY_TIMEZONE)
+    return (local_now - timedelta(hours=4)).date()
+
+
+def format_activity_date(value: date) -> str:
+    """Render a date using the member-facing month/day/year format."""
+    return f"{value.month}/{value.day}/{value.year}"
+
+
+def parse_activity_date(value: str) -> date | None:
+    """Parse M/D/YY or M/D/YYYY while preserving an intentionally blank value."""
+    clean = value.strip()
+    if not clean:
         return None
-    if not all(parts):
-        raise ValueError("Enter month, day, and year—or leave all three blank")
-    if not all(value.isdigit() for value in parts):
-        raise ValueError("Month, day, and year must be numbers")
-    month_value, day_value, year_value = (int(value) for value in parts)
-    if len(parts[2]) != 4:
-        raise ValueError("Use a four-digit year")
-    return date(year_value, month_value, day_value)
+    parts = clean.split("/")
+    if len(parts) != 3 or not all(part.isdigit() for part in parts):
+        raise ValueError("Use Month/Day/Year format")
+    month, day, year = parts
+    if not 1 <= len(month) <= 2 or not 1 <= len(day) <= 2 or len(year) not in (2, 4):
+        raise ValueError("Use Month/Day/Year format")
+    year_value = int(year)
+    if len(year) == 2:
+        year_value += 2000 if year_value <= 49 else 1900
+    return date(year_value, int(month), int(day))
 
 
 def selected_rating(select: discord.ui.Select[discord.ui.Modal]) -> Decimal | None:
@@ -113,8 +128,9 @@ class OwnedView(discord.ui.View):
 class MovieLogStartView(OwnedView):
     """Let a member choose lookup or manual entry before searching TMDB."""
 
-    def __init__(self, owner_id: int, dependencies: LogDependencies) -> None:
+    def __init__(self, owner_id: int, title: str, dependencies: LogDependencies) -> None:
         super().__init__(owner_id)
+        self.title = title
         self.dependencies = dependencies
 
     @discord.ui.button(label="Search TMDB", style=discord.ButtonStyle.primary, emoji="🔎")
@@ -123,7 +139,8 @@ class MovieLogStartView(OwnedView):
         interaction: discord.Interaction,
         _button: discord.ui.Button[MovieLogStartView],
     ) -> None:
-        await interaction.response.send_modal(MovieSearchModal(self.dependencies))
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        await present_movie_results(interaction, self.title, self.dependencies)
 
     @discord.ui.button(label="Enter manually", style=discord.ButtonStyle.secondary, emoji="✏️")
     async def manual(
@@ -132,7 +149,7 @@ class MovieLogStartView(OwnedView):
         _button: discord.ui.Button[MovieLogStartView],
     ) -> None:
         await interaction.response.send_modal(
-            ManualMediaModal(MediaDraft(kind="movie", title=""), self.dependencies)
+            ManualMediaModal(MediaDraft(kind="movie", title=self.title), self.dependencies)
         )
 
 
@@ -166,43 +183,52 @@ class MovieSearchModal(discord.ui.Modal):
     async def on_submit(self, interaction: discord.Interaction) -> None:
         query = str(self.query_input).strip()
         await interaction.response.defer(ephemeral=True, thinking=True)
-        if self.dependencies.tmdb is None:
-            await interaction.followup.send(
-                "Movie lookup is unavailable. You can still enter it manually.",
-                view=ManualStartView(
-                    interaction.user.id,
-                    MediaDraft(kind="movie", title=query),
-                    self.dependencies,
-                ),
-                ephemeral=True,
-            )
-            return
-        try:
-            movies = await self.dependencies.tmdb.search_movies(query)
-        except TmdbError:
-            logger.exception("TMDB lookup failed during movie log")
-            movies = []
-        if not movies:
-            await interaction.followup.send(
-                "No useful movie results were found. You can enter it manually.",
-                view=ManualStartView(
-                    interaction.user.id,
-                    MediaDraft(kind="movie", title=query),
-                    self.dependencies,
-                ),
-                ephemeral=True,
-            )
-            return
+        await present_movie_results(interaction, query, self.dependencies)
+
+
+async def present_movie_results(
+    interaction: discord.Interaction,
+    query: str,
+    dependencies: LogDependencies,
+) -> None:
+    """Search TMDB and display results after an interaction has been deferred."""
+    if dependencies.tmdb is None:
         await interaction.followup.send(
-            "Choose the correct movie:",
-            view=MovieLookupView(
+            "Movie lookup is unavailable. You can still enter it manually.",
+            view=ManualStartView(
                 interaction.user.id,
-                query,
-                movies,
-                self.dependencies,
+                MediaDraft(kind="movie", title=query),
+                dependencies,
             ),
             ephemeral=True,
         )
+        return
+    try:
+        movies = await dependencies.tmdb.search_movies(query)
+    except TmdbError:
+        logger.exception("TMDB lookup failed during movie log")
+        movies = []
+    if not movies:
+        await interaction.followup.send(
+            "No useful movie results were found. You can enter it manually.",
+            view=ManualStartView(
+                interaction.user.id,
+                MediaDraft(kind="movie", title=query),
+                dependencies,
+            ),
+            ephemeral=True,
+        )
+        return
+    await interaction.followup.send(
+        "Choose the correct movie:",
+        view=MovieLookupView(
+            interaction.user.id,
+            query,
+            movies,
+            dependencies,
+        ),
+        ephemeral=True,
+    )
 
 
 class ManualStartView(OwnedView):
@@ -483,7 +509,7 @@ class ContinueLogView(OwnedView):
 
 
 class LogDetailsModal(discord.ui.Modal):
-    """Collect optional review, constrained rating, and separate date parts."""
+    """Collect member log data and whether to create a forum post."""
 
     def __init__(
         self,
@@ -491,6 +517,7 @@ class LogDetailsModal(discord.ui.Modal):
         dependencies: LogDependencies,
         *,
         initial: LogData | None = None,
+        publish: bool = True,
     ) -> None:
         super().__init__(title="Your log", timeout=600)
         self.draft = draft
@@ -509,24 +536,22 @@ class LogDetailsModal(discord.ui.Modal):
             max_values=1,
             required=True,
         )
-        initial_date = initial.activity_date if initial is not None else None
-        self.month_input: discord.ui.TextInput[LogDetailsModal] = discord.ui.TextInput(
-            default=str(initial_date.month) if initial_date else None,
-            placeholder="MM",
+        initial_date = initial.activity_date if initial is not None else default_activity_date()
+        self.date_input: discord.ui.TextInput[LogDetailsModal] = discord.ui.TextInput(
+            default=format_activity_date(initial_date) if initial_date else None,
+            placeholder="Month/Day/Year",
             required=False,
-            max_length=2,
+            max_length=10,
         )
-        self.day_input: discord.ui.TextInput[LogDetailsModal] = discord.ui.TextInput(
-            default=str(initial_date.day) if initial_date else None,
-            placeholder="DD",
-            required=False,
-            max_length=2,
-        )
-        self.year_input: discord.ui.TextInput[LogDetailsModal] = discord.ui.TextInput(
-            default=str(initial_date.year) if initial_date else None,
-            placeholder="YYYY",
-            required=False,
-            max_length=4,
+        self.publish_input: discord.ui.Select[LogDetailsModal] = discord.ui.Select(
+            placeholder="Create a forum post?",
+            options=[
+                discord.SelectOption(label="Yes", value="yes", default=publish),
+                discord.SelectOption(label="No", value="no", default=not publish),
+            ],
+            min_values=1,
+            max_values=1,
+            required=True,
         )
         self.add_item(
             discord.ui.Label(
@@ -544,28 +569,29 @@ class LogDetailsModal(discord.ui.Modal):
         )
         self.add_item(
             discord.ui.Label(
-                text="Month (optional)",
-                description="Leave all three date fields blank to record no date",
-                component=self.month_input,
+                text="Date (optional)",
+                description="Month/Day/Year; leave blank to record no date",
+                component=self.date_input,
             )
         )
-        self.add_item(discord.ui.Label(text="Day (optional)", component=self.day_input))
-        self.add_item(discord.ui.Label(text="Year (optional)", component=self.year_input))
+        self.add_item(
+            discord.ui.Label(
+                text="Create forum post?",
+                description="Choose No to save only in your log history",
+                component=self.publish_input,
+            )
+        )
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         try:
             log_data = LogData(
                 review=str(self.review_input).strip() or None,
                 rating=selected_rating(self.rating_input),
-                activity_date=parse_activity_date_parts(
-                    str(self.month_input),
-                    str(self.day_input),
-                    str(self.year_input),
-                ),
+                activity_date=parse_activity_date(str(self.date_input)),
             )
         except ValueError:
             await interaction.response.send_message(
-                "Enter a real numeric month, day, and four-digit year—or leave all three blank.",
+                "Enter a real date as `Month/Day/Year`, such as `10/14/2026` or `10/14/26`.",
                 view=LogDetailsRetryView(
                     interaction.user.id,
                     self.draft,
@@ -575,20 +601,19 @@ class LogDetailsModal(discord.ui.Modal):
                         rating=selected_rating(self.rating_input),
                         activity_date=None,
                     ),
+                    self.publish_input.values[0] == "yes",
                 ),
                 ephemeral=True,
             )
             return
 
-        await interaction.response.send_message(
-            f"How would you like to save **{self.draft.title}**?",
-            view=LogDestinationView(
-                interaction.user.id,
-                self.draft,
-                log_data,
-                self.dependencies,
-            ),
-            ephemeral=True,
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        await save_new_log(
+            interaction,
+            self.draft,
+            log_data,
+            self.dependencies,
+            publish=self.publish_input.values[0] == "yes",
         )
 
 
@@ -599,11 +624,13 @@ class LogDetailsRetryView(OwnedView):
         draft: MediaDraft,
         dependencies: LogDependencies,
         initial: LogData,
+        publish: bool,
     ) -> None:
         super().__init__(owner_id)
         self.draft = draft
         self.dependencies = dependencies
         self.initial = initial
+        self.publish = publish
 
     @discord.ui.button(label="Correct the date", style=discord.ButtonStyle.primary)
     async def retry(
@@ -616,42 +643,9 @@ class LogDetailsRetryView(OwnedView):
                 self.draft,
                 self.dependencies,
                 initial=self.initial,
+                publish=self.publish,
             )
         )
-
-
-class LogDestinationView(OwnedView):
-    """Choose whether a validated log creates a forum post or remains private."""
-
-    def __init__(
-        self,
-        owner_id: int,
-        draft: MediaDraft,
-        log_data: LogData,
-        dependencies: LogDependencies,
-    ) -> None:
-        super().__init__(owner_id)
-        self.draft = draft
-        self.log_data = log_data
-        self.dependencies = dependencies
-
-    @discord.ui.button(label="Post to forum", style=discord.ButtonStyle.primary)
-    async def post_to_forum(
-        self,
-        interaction: discord.Interaction,
-        _button: discord.ui.Button[LogDestinationView],
-    ) -> None:
-        await interaction.response.edit_message(content="Saving and creating the post…", view=None)
-        await save_new_log(interaction, self.draft, self.log_data, self.dependencies, publish=True)
-
-    @discord.ui.button(label="Save privately", style=discord.ButtonStyle.secondary)
-    async def save_privately(
-        self,
-        interaction: discord.Interaction,
-        _button: discord.ui.Button[LogDestinationView],
-    ) -> None:
-        await interaction.response.edit_message(content="Saving your private log…", view=None)
-        await save_new_log(interaction, self.draft, self.log_data, self.dependencies, publish=False)
 
 
 async def save_new_log(
@@ -741,41 +735,25 @@ class EditLogModal(discord.ui.Modal):
             max_values=1,
             required=True,
         )
-        self.month_input: discord.ui.TextInput[EditLogModal] = discord.ui.TextInput(
-            default=str(media_log.activity_date.month) if media_log.activity_date else None,
-            placeholder="MM",
+        self.date_input: discord.ui.TextInput[EditLogModal] = discord.ui.TextInput(
+            default=(
+                format_activity_date(media_log.activity_date) if media_log.activity_date else None
+            ),
+            placeholder="Month/Day/Year",
             required=False,
-            max_length=2,
-        )
-        self.day_input: discord.ui.TextInput[EditLogModal] = discord.ui.TextInput(
-            default=str(media_log.activity_date.day) if media_log.activity_date else None,
-            placeholder="DD",
-            required=False,
-            max_length=2,
-        )
-        self.year_input: discord.ui.TextInput[EditLogModal] = discord.ui.TextInput(
-            default=str(media_log.activity_date.year) if media_log.activity_date else None,
-            placeholder="YYYY",
-            required=False,
-            max_length=4,
+            max_length=10,
         )
         self.add_item(discord.ui.Label(text="Review (optional)", component=self.review_input))
         self.add_item(discord.ui.Label(text="Rating (optional)", component=self.rating_input))
-        self.add_item(discord.ui.Label(text="Month (optional)", component=self.month_input))
-        self.add_item(discord.ui.Label(text="Day (optional)", component=self.day_input))
-        self.add_item(discord.ui.Label(text="Year (optional)", component=self.year_input))
+        self.add_item(discord.ui.Label(text="Date (optional)", component=self.date_input))
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         try:
-            activity_date = parse_activity_date_parts(
-                str(self.month_input),
-                str(self.day_input),
-                str(self.year_input),
-            )
+            activity_date = parse_activity_date(str(self.date_input))
             rating = selected_rating(self.rating_input)
         except ValueError:
             await interaction.response.send_message(
-                "Enter a real numeric month, day, and four-digit year—or leave all three blank. "
+                "Enter a real date as `Month/Day/Year`, such as `10/14/2026` or `10/14/26`. "
                 "Please run `/edit` again.",
                 ephemeral=True,
             )

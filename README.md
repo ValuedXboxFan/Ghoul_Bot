@@ -75,13 +75,14 @@ immediately without waiting for global command propagation:
 
 - `/ping` confirms the Gateway connection and displays latency.
 - `/status` reports the active environment and PostgreSQL connectivity.
-- `/log` provides an inline type selector for Movies, TV Shows, Books, Comics, Podcasts,
-  Music, Video Games, and Other. Movies then offer **Search TMDB** or **Enter manually**;
-  a matched movie includes a preview picker for its available TMDB poster artwork. Other
-  types collect a title and optional artwork manually.
+- `/log` requires an inline media type and title. Movies then offer **Search TMDB** or
+  **Enter manually**; the supplied title is searched directly or pre-populated for manual
+  entry. A matched movie includes a preview picker for its available TMDB poster artwork.
+  Other types open manual entry with the supplied title already filled in.
 - Every log can include an optional review, strict 1–5 half-step rating, and optional
-  activity date entered as separate month, day, and year fields. Members then choose
-  whether to create a forum post or save only a private history record.
+  `Month/Day/Year` activity date. New logs default to the current Chicago activity day,
+  which changes at 4 AM. The same form defaults to creating a forum post but can save only
+  a private history record instead.
 - `/edit` and `/delete` operate only inside a registered forum post and only for its
   registered owner.
 - `/logs` privately manages history records that do not have a forum post.
