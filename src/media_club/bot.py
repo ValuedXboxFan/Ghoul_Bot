@@ -5,9 +5,19 @@ from discord import app_commands
 
 from media_club.config import Settings
 from media_club.database import Database
-from media_club.movie_ui import MovieAttachView, MoviePostView, MovieSearchView
+from media_club.log_ui import (
+    DeleteConfirmationView,
+    EditChoiceView,
+    LogDependencies,
+    LogsView,
+    ManualMediaModal,
+    MovieSearchModal,
+)
+from media_club.logging_workflow import ForumPublisher, MediaDraft
+from media_club.media_types import MediaKind
+from media_club.models import MediaLog
 from media_club.repositories import MediaRepository
-from media_club.tmdb import TmdbClient, TmdbError
+from media_club.tmdb import TmdbClient
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +47,12 @@ class GhoulBot(discord.Client):
         self.database = database
         self.tmdb = tmdb
         self.media_repository = MediaRepository(database)
+        self.publisher = ForumPublisher(config.media_forum_channel_id, tmdb)
+        self.log_dependencies = LogDependencies(
+            repository=self.media_repository,
+            publisher=self.publisher,
+            tmdb=tmdb,
+        )
         self.guild = discord.Object(id=guild_id)
         self.tree = app_commands.CommandTree(self)
         self._register_commands(config)
@@ -56,159 +72,138 @@ class GhoulBot(discord.Client):
         async def status(interaction: discord.Interaction) -> None:
             database_status = "connected" if await self.database.ping() else "unavailable"
             tmdb_status = "configured" if self.tmdb is not None else "not configured"
-            movie_forum_status = (
-                "configured"
-                if config.discord_movie_forum_channel_id is not None
-                else "not configured"
+            media_forum_status = (
+                "configured" if config.media_forum_channel_id is not None else "not configured"
             )
             await interaction.response.send_message(
                 f"Environment: **{config.app_env}**\n"
                 f"Database: **{database_status}**\n"
                 f"TMDB: **{tmdb_status}**\n"
-                f"Movie forum: **{movie_forum_status}**",
+                f"Media forum: **{media_forum_status}**",
                 ephemeral=True,
             )
 
-        movie_group = app_commands.Group(name="movie", description="Find and manage movies")
+        log_group = app_commands.Group(name="log", description="Log media you've experienced")
 
-        @movie_group.command(name="search", description="Search TMDB for a movie")
-        @app_commands.describe(title="Movie title to search for")
-        async def movie_search(interaction: discord.Interaction, title: str) -> None:
-            if self.tmdb is None:
-                await interaction.response.send_message(
-                    "TMDB is not configured yet.",
-                    ephemeral=True,
+        @log_group.command(name="movie", description="Log a movie")
+        async def log_movie(interaction: discord.Interaction) -> None:
+            await interaction.response.send_modal(MovieSearchModal(self.log_dependencies))
+
+        async def start_manual_log(
+            interaction: discord.Interaction,
+            media_kind: MediaKind,
+        ) -> None:
+            await interaction.response.send_modal(
+                ManualMediaModal(
+                    MediaDraft(kind=media_kind, title=""),
+                    self.log_dependencies,
                 )
-                return
-
-            await interaction.response.defer(ephemeral=True, thinking=True)
-            try:
-                movies = await self.tmdb.search_movies(title)
-            except TmdbError:
-                logger.exception("TMDB search failed")
-                await interaction.followup.send(
-                    "TMDB could not complete that search. Please try again shortly.",
-                    ephemeral=True,
-                )
-                return
-
-            if not movies:
-                await interaction.followup.send(
-                    f'No movies matched "{title}".',
-                    ephemeral=True,
-                )
-                return
-
-            await interaction.followup.send(
-                f"Search results for **{title}**:",
-                view=MovieSearchView(movies, self.media_repository),
-                ephemeral=True,
             )
 
-        @movie_group.command(name="post", description="Create a movie review forum post")
-        @app_commands.describe(title="Movie title to search for")
-        async def movie_post(interaction: discord.Interaction, title: str) -> None:
-            forum_channel_id = config.discord_movie_forum_channel_id
-            if self.tmdb is None:
-                await interaction.response.send_message(
-                    "TMDB is not configured yet.", ephemeral=True
-                )
-                return
-            if forum_channel_id is None:
-                await interaction.response.send_message(
-                    "The movie forum is not configured yet.", ephemeral=True
-                )
-                return
+        @log_group.command(name="tv_show", description="Log a TV show")
+        async def log_tv_show(interaction: discord.Interaction) -> None:
+            await start_manual_log(interaction, "tv_show")
 
-            await interaction.response.defer(ephemeral=True, thinking=True)
-            try:
-                movies = await self.tmdb.search_movies(title)
-            except TmdbError:
-                logger.exception("TMDB search failed")
-                await interaction.followup.send(
-                    "TMDB could not complete that search. Please try again shortly.",
-                    ephemeral=True,
-                )
-                return
-            if not movies:
-                await interaction.followup.send(f'No movies matched "{title}".', ephemeral=True)
-                return
+        @log_group.command(name="book", description="Log a book")
+        async def log_book(interaction: discord.Interaction) -> None:
+            await start_manual_log(interaction, "book")
 
-            await interaction.followup.send(
-                "Choose a movie. You'll write your review on the next screen:",
-                view=MoviePostView(
-                    movies,
-                    self.media_repository,
-                    self.tmdb,
-                    forum_channel_id,
-                    config.discord_movie_tag_name,
-                ),
-                ephemeral=True,
-            )
+        @log_group.command(name="comic", description="Log a comic")
+        async def log_comic(interaction: discord.Interaction) -> None:
+            await start_manual_log(interaction, "comic")
 
-        @movie_group.command(name="attach", description="Add movie details to this forum post")
-        @app_commands.describe(title="Movie title to search for")
-        async def movie_attach(interaction: discord.Interaction, title: str) -> None:
-            if self.tmdb is None:
-                await interaction.response.send_message(
-                    "TMDB is not configured yet.", ephemeral=True
-                )
-                return
+        @log_group.command(name="podcast", description="Log a podcast")
+        async def log_podcast(interaction: discord.Interaction) -> None:
+            await start_manual_log(interaction, "podcast")
 
+        @log_group.command(name="music", description="Log music")
+        async def log_music(interaction: discord.Interaction) -> None:
+            await start_manual_log(interaction, "music")
+
+        @log_group.command(name="video_game", description="Log a video game")
+        async def log_video_game(interaction: discord.Interaction) -> None:
+            await start_manual_log(interaction, "video_game")
+
+        @log_group.command(name="other", description="Log another kind of media")
+        async def log_other(interaction: discord.Interaction) -> None:
+            await start_manual_log(interaction, "other")
+
+        self.tree.add_command(log_group, guild=self.guild)
+
+        async def owned_thread_log(interaction: discord.Interaction) -> MediaLog | None:
             channel = interaction.channel
             if not isinstance(channel, discord.Thread) or not isinstance(
                 channel.parent, discord.ForumChannel
             ):
                 await interaction.response.send_message(
-                    "Use this command inside an existing forum post.", ephemeral=True
+                    "Use this command inside a Ghoul Bot forum post.", ephemeral=True
                 )
-                return
-
-            is_owner = channel.owner_id == interaction.user.id
-            is_moderator = isinstance(interaction.user, discord.Member) and (
-                interaction.user.guild_permissions.manage_threads
-            )
-            if not is_owner and not is_moderator:
+                return None
+            media_log = await self.media_repository.get_log_for_thread(channel.id)
+            if media_log is None:
                 await interaction.response.send_message(
-                    "Only the post's creator or a thread moderator can attach a movie.",
-                    ephemeral=True,
+                    "This forum post is not registered as a Ghoul Bot log.", ephemeral=True
                 )
-                return
-
-            configured_forum_id = config.discord_movie_forum_channel_id
-            if configured_forum_id is not None and channel.parent.id != configured_forum_id:
+                return None
+            if media_log.discord_user_id != interaction.user.id:
                 await interaction.response.send_message(
-                    "This is not the configured movie forum.", ephemeral=True
+                    "Only the registered owner can manage this log.", ephemeral=True
                 )
-                return
+                return None
+            return media_log
 
-            await interaction.response.defer(ephemeral=True, thinking=True)
-            try:
-                movies = await self.tmdb.search_movies(title)
-            except TmdbError:
-                logger.exception("TMDB search failed")
-                await interaction.followup.send(
-                    "TMDB could not complete that search. Please try again shortly.",
-                    ephemeral=True,
-                )
+        @self.tree.command(name="edit", description="Edit this Ghoul Bot media log")
+        @app_commands.guilds(self.guild)
+        async def edit(interaction: discord.Interaction) -> None:
+            media_log = await owned_thread_log(interaction)
+            if media_log is None:
                 return
-            if not movies:
-                await interaction.followup.send(f'No movies matched "{title}".', ephemeral=True)
-                return
-
-            await interaction.followup.send(
-                "Choose the movie that belongs to this forum post:",
-                view=MovieAttachView(
-                    movies,
-                    self.media_repository,
-                    self.tmdb,
-                    channel,
-                    config.discord_movie_tag_name,
+            await interaction.response.send_message(
+                "What would you like to change?",
+                view=EditChoiceView(
+                    interaction.user.id,
+                    media_log,
+                    self.log_dependencies,
                 ),
                 ephemeral=True,
             )
 
-        self.tree.add_command(movie_group, guild=self.guild)
+        @self.tree.command(name="delete", description="Delete this post and its log history")
+        @app_commands.guilds(self.guild)
+        async def delete(interaction: discord.Interaction) -> None:
+            media_log = await owned_thread_log(interaction)
+            if media_log is None:
+                return
+            await interaction.response.send_message(
+                "This permanently deletes the forum post **and removes it from your log "
+                "history**. This cannot be undone. Continue?",
+                view=DeleteConfirmationView(
+                    interaction.user.id,
+                    media_log,
+                    self.log_dependencies,
+                ),
+                ephemeral=True,
+            )
+
+        @self.tree.command(name="logs", description="Manage logs without forum posts")
+        @app_commands.guilds(self.guild)
+        async def logs(interaction: discord.Interaction) -> None:
+            await interaction.response.defer(ephemeral=True, thinking=True)
+            media_logs = await self.media_repository.list_unposted_logs(interaction.user.id)
+            if not media_logs:
+                await interaction.followup.send(
+                    "You don't have any private logs without forum posts.", ephemeral=True
+                )
+                return
+            await interaction.followup.send(
+                "Choose one of your private logs:",
+                view=LogsView(
+                    interaction.user.id,
+                    media_logs,
+                    self.log_dependencies,
+                ),
+                ephemeral=True,
+            )
 
     async def setup_hook(self) -> None:
         """Register guild commands immediately in the staging server."""

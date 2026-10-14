@@ -1,0 +1,128 @@
+from datetime import date
+from decimal import Decimal
+from typing import cast
+
+import discord
+import pytest
+
+from media_club.bot import GhoulBot
+from media_club.config import Settings
+from media_club.log_ui import (
+    LogDependencies,
+    LogDetailsModal,
+    ManualMediaModal,
+    MovieSearchModal,
+    parse_activity_date,
+    rating_options,
+)
+from media_club.logging_workflow import (
+    ForumPublisher,
+    MediaDraft,
+    display_title,
+    log_content,
+    log_embed,
+)
+from media_club.models import MediaItem, MediaLog
+
+
+class FakeAvatar:
+    url = "https://cdn.example/avatar.png"
+
+
+class FakeUser:
+    id = 42
+    mention = "<@42>"
+    display_name = "Ghoul Friend"
+    display_avatar = FakeAvatar()
+
+
+def test_optional_date_is_not_defaulted() -> None:
+    assert parse_activity_date("") is None
+    assert parse_activity_date("2026-10-14") == date(2026, 10, 14)
+    with pytest.raises(ValueError):
+        parse_activity_date("10/14/2026")
+    with pytest.raises(ValueError):
+        parse_activity_date("2026-02-30")
+
+
+def test_rating_options_are_strict_half_steps() -> None:
+    options = rating_options()
+    assert [option.value for option in options] == [
+        "none",
+        "1",
+        "1.5",
+        "2",
+        "2.5",
+        "3",
+        "3.5",
+        "4",
+        "4.5",
+        "5",
+    ]
+
+
+def test_movie_title_and_reviewer_snapshot_render_in_post() -> None:
+    item = MediaItem(
+        id=1,
+        media_type="movie",
+        provider="tmdb",
+        provider_id="348",
+        title="Alien",
+        release_date=date(1979, 5, 25),
+        provider_payload={},
+    )
+    media_log = MediaLog(
+        id=7,
+        media_item_id=1,
+        discord_user_id=42,
+        review="Still terrifying.",
+        rating=Decimal("5.0"),
+        activity_date=None,
+        media_item=item,
+    )
+
+    embed = log_embed(cast(discord.User, FakeUser()), media_log)
+
+    assert display_title(item) == "Alien (1979)"
+    assert embed.author.name == "Ghoul Friend's log"
+    assert embed.author.icon_url == "https://cdn.example/avatar.png"
+    assert embed.description is None
+    assert embed.fields[0].value == "5/5"
+    assert "log #7" in (embed.footer.text or "")
+    assert log_content(cast(discord.User, FakeUser()), media_log) == (
+        "**Review by <@42>**\n\nStill terrifying."
+    )
+
+
+def test_modal_layouts_and_command_tree_construct() -> None:
+    dependencies = LogDependencies(
+        repository=cast(object, None),
+        publisher=ForumPublisher(None, None),
+        tmdb=None,
+    )
+    draft = MediaDraft(kind="book", title="")
+
+    assert len(MovieSearchModal(dependencies).to_components()) == 1
+    assert len(ManualMediaModal(draft, dependencies).to_components()) == 2
+    assert len(LogDetailsModal(draft, dependencies).to_components()) == 4
+
+    bot = GhoulBot(
+        Settings(discord_application_id=1, discord_guild_id=2),
+        cast(object, None),
+        None,
+    )
+    commands = bot.tree.get_commands(guild=bot.guild)
+    command_names = {command.name for command in commands}
+    assert command_names == {"ping", "status", "log", "edit", "delete", "logs"}
+    log_group = next(command for command in commands if command.name == "log")
+    assert isinstance(log_group, discord.app_commands.Group)
+    assert {command.name for command in log_group.commands} == {
+        "movie",
+        "tv_show",
+        "book",
+        "comic",
+        "podcast",
+        "music",
+        "video_game",
+        "other",
+    }

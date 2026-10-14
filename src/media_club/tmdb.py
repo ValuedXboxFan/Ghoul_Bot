@@ -100,11 +100,15 @@ class TmdbClient:
 
     async def download_poster(self, movie: TmdbMovie) -> bytes | None:
         """Download poster artwork for upload to Discord."""
-        if movie.poster_url is None:
+        return await self.download_poster_path(movie.poster_path)
+
+    async def download_poster_path(self, poster_path: str | None) -> bytes | None:
+        """Download poster artwork from a stored TMDB poster path."""
+        if poster_path is None:
             return None
 
         try:
-            response = await self.http.get(movie.poster_url)
+            response = await self.http.get(f"{TMDB_IMAGE_URL}{poster_path}")
             response.raise_for_status()
         except httpx.HTTPError as error:
             raise TmdbError("TMDB poster download failed") from error

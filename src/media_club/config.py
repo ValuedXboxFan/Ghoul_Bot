@@ -15,8 +15,9 @@ class Settings(BaseSettings):
     discord_bot_token: SecretStr | None = None
     discord_application_id: int | None = None
     discord_guild_id: int | None = None
+    discord_media_forum_channel_id: int | None = None
+    # Backward-compatible staging variable from the movie-only prototype.
     discord_movie_forum_channel_id: int | None = None
-    discord_movie_tag_name: str = "Movies"
     tmdb_read_access_token: SecretStr | None = None
     tmdb_language: str = "en-US"
     tmdb_region: str = "US"
@@ -31,6 +32,11 @@ class Settings(BaseSettings):
                 self.discord_guild_id,
             )
         )
+
+    @property
+    def media_forum_channel_id(self) -> int | None:
+        """Return the configured all-media forum, including the legacy variable."""
+        return self.discord_media_forum_channel_id or self.discord_movie_forum_channel_id
 
 
 settings = Settings()
