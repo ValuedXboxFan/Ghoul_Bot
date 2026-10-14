@@ -1,6 +1,9 @@
+import asyncio
 from datetime import date, datetime
 from decimal import Decimal
+from types import SimpleNamespace
 from typing import cast
+from unittest.mock import AsyncMock
 from zoneinfo import ZoneInfo
 
 import discord
@@ -15,6 +18,7 @@ from media_club.log_ui import (
     MovieArtworkView,
     MovieSearchModal,
     default_activity_date,
+    open_modal_and_dismiss_prompt,
     parse_activity_date,
     rating_options,
 )
@@ -120,6 +124,27 @@ def test_movie_title_and_reviewer_snapshot_render_in_post() -> None:
 
 def test_half_star_rating_display() -> None:
     assert rating_stars(Decimal("3.5")) == "⭐⭐⭐½☆ (3.5)"
+
+
+def test_opening_next_modal_dismisses_the_completed_prompt() -> None:
+    prompt = SimpleNamespace(delete=AsyncMock())
+    response = SimpleNamespace(send_modal=AsyncMock())
+    interaction = cast(
+        discord.Interaction,
+        SimpleNamespace(message=prompt, response=response),
+    )
+    modal = MovieSearchModal(
+        LogDependencies(
+            repository=cast(object, None),
+            publisher=ForumPublisher(None, None),
+            tmdb=None,
+        )
+    )
+
+    asyncio.run(open_modal_and_dismiss_prompt(interaction, modal))
+
+    response.send_modal.assert_awaited_once_with(modal)
+    prompt.delete.assert_awaited_once_with()
 
 
 def test_modal_layouts_and_command_tree_construct() -> None:

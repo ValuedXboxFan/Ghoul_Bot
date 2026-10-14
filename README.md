@@ -80,6 +80,8 @@ immediately without waiting for global command propagation:
   **Enter manually**; the supplied title is searched directly or pre-populated for manual
   entry. A matched movie shows its first five available TMDB posters together for selection.
   Other types open manual entry with the supplied title already filled in.
+- Completed action prompts are replaced as the logging flow advances. A prompt that opens a
+  modal is dismissed immediately, so closing that modal requires restarting `/log`.
 - Every log can include an optional review, strict 1–5 half-step rating, and optional
   `Month/Day/Year` activity date. New logs default to the current Chicago activity day,
   which changes at 4 AM. The same form defaults to creating a forum post but can save only

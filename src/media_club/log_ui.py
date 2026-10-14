@@ -110,6 +110,18 @@ async def persist_draft(dependencies: LogDependencies, draft: MediaDraft) -> Med
     )
 
 
+async def open_modal_and_dismiss_prompt(
+    interaction: discord.Interaction,
+    modal: discord.ui.Modal,
+) -> None:
+    """Open the next modal, then remove the action prompt that launched it."""
+    prompt = interaction.message
+    await interaction.response.send_modal(modal)
+    if prompt is not None:
+        with suppress(discord.HTTPException):
+            await prompt.delete()
+
+
 class OwnedView(discord.ui.View):
     """Base ephemeral view restricted to the member who started it."""
 
@@ -156,7 +168,7 @@ class MovieLogStartView(OwnedView):
         interaction: discord.Interaction,
         _button: discord.ui.Button[MovieLogStartView],
     ) -> None:
-        await interaction.response.defer(ephemeral=True, thinking=True)
+        await interaction.response.defer()
         await present_movie_results(interaction, self.title, self.dependencies)
 
     @discord.ui.button(label="Enter manually", style=discord.ButtonStyle.secondary, emoji="✏️")
@@ -165,8 +177,9 @@ class MovieLogStartView(OwnedView):
         interaction: discord.Interaction,
         _button: discord.ui.Button[MovieLogStartView],
     ) -> None:
-        await interaction.response.send_modal(
-            ManualMediaModal(MediaDraft(kind="movie", title=self.title), self.dependencies)
+        await open_modal_and_dismiss_prompt(
+            interaction,
+            ManualMediaModal(MediaDraft(kind="movie", title=self.title), self.dependencies),
         )
 
 
@@ -210,14 +223,13 @@ async def present_movie_results(
 ) -> None:
     """Search TMDB and display results after an interaction has been deferred."""
     if dependencies.tmdb is None:
-        await interaction.followup.send(
-            "Movie lookup is unavailable. You can still enter it manually.",
+        await interaction.edit_original_response(
+            content="Movie lookup is unavailable. You can still enter it manually.",
             view=ManualStartView(
                 interaction.user.id,
                 MediaDraft(kind="movie", title=query),
                 dependencies,
             ),
-            ephemeral=True,
         )
         return
     try:
@@ -226,25 +238,23 @@ async def present_movie_results(
         logger.exception("TMDB lookup failed during movie log")
         movies = []
     if not movies:
-        await interaction.followup.send(
-            "No useful movie results were found. You can enter it manually.",
+        await interaction.edit_original_response(
+            content="No useful movie results were found. You can enter it manually.",
             view=ManualStartView(
                 interaction.user.id,
                 MediaDraft(kind="movie", title=query),
                 dependencies,
             ),
-            ephemeral=True,
         )
         return
-    await interaction.followup.send(
-        "Choose the correct movie:",
+    await interaction.edit_original_response(
+        content="Choose the correct movie:",
         view=MovieLookupView(
             interaction.user.id,
             query,
             movies,
             dependencies,
         ),
-        ephemeral=True,
     )
 
 
@@ -267,7 +277,10 @@ class ManualStartView(OwnedView):
         interaction: discord.Interaction,
         _button: discord.ui.Button[ManualStartView],
     ) -> None:
-        await interaction.response.send_modal(ManualMediaModal(self.draft, self.dependencies))
+        await open_modal_and_dismiss_prompt(
+            interaction,
+            ManualMediaModal(self.draft, self.dependencies),
+        )
 
 
 class MovieLookupSelect(discord.ui.Select[MovieLookupView]):
@@ -297,7 +310,7 @@ class MovieLookupSelect(discord.ui.Select[MovieLookupView]):
 
     async def callback(self, interaction: discord.Interaction) -> None:
         movie = self.movies[self.values[0]]
-        await interaction.response.defer(ephemeral=True, thinking=True)
+        await interaction.response.defer()
         poster_paths = [movie.poster_path] if movie.poster_path else []
         if self.dependencies.tmdb is not None:
             try:
@@ -406,7 +419,8 @@ class MovieArtworkView(OwnedLayoutView):
         poster_path = (
             self.poster_paths[self.selected_index] if self.selected_index is not None else None
         )
-        await interaction.response.send_modal(
+        await open_modal_and_dismiss_prompt(
+            interaction,
             LogDetailsModal(
                 MediaDraft(
                     kind="movie",
@@ -415,7 +429,7 @@ class MovieArtworkView(OwnedLayoutView):
                     selected_poster_path=poster_path,
                 ),
                 self.dependencies,
-            )
+            ),
         )
 
 
@@ -521,12 +535,13 @@ class ManualRetryView(OwnedView):
         interaction: discord.Interaction,
         _button: discord.ui.Button[ManualRetryView],
     ) -> None:
-        await interaction.response.send_modal(
+        await open_modal_and_dismiss_prompt(
+            interaction,
             ManualMediaModal(
                 self.draft,
                 self.dependencies,
                 replacement_log_id=self.replacement_log_id,
-            )
+            ),
         )
 
 
@@ -547,7 +562,10 @@ class ContinueLogView(OwnedView):
         interaction: discord.Interaction,
         _button: discord.ui.Button[ContinueLogView],
     ) -> None:
-        await interaction.response.send_modal(LogDetailsModal(self.draft, self.dependencies))
+        await open_modal_and_dismiss_prompt(
+            interaction,
+            LogDetailsModal(self.draft, self.dependencies),
+        )
 
 
 class LogDetailsModal(discord.ui.Modal):
@@ -680,13 +698,14 @@ class LogDetailsRetryView(OwnedView):
         interaction: discord.Interaction,
         _button: discord.ui.Button[LogDetailsRetryView],
     ) -> None:
-        await interaction.response.send_modal(
+        await open_modal_and_dismiss_prompt(
+            interaction,
             LogDetailsModal(
                 self.draft,
                 self.dependencies,
                 initial=self.initial,
                 publish=self.publish,
-            )
+            ),
         )
 
 
