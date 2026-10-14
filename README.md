@@ -77,6 +77,15 @@ immediately without waiting for global command propagation:
 - `/status` reports the active environment and PostgreSQL connectivity.
 - `/movie search` searches TMDB, presents an interactive picker, saves the selected
   movie, and displays its poster and overview.
+- `/movie post` collects a review and rating, then creates a bot-authored forum post
+  with the normalized title, Movies tag, reviewer attribution, and poster attachment.
+- `/movie attach` is used inside a member-authored forum post. It normalizes the thread
+  title, applies the Movies tag, and adds the selected poster as a bot reply.
+
+Set `DISCORD_MOVIE_FORUM_CHANNEL_ID` to the target forum channel ID. The bot looks for
+the `Movies` tag by default; override its name with `DISCORD_MOVIE_TAG_NAME` if needed.
+The bot needs permission to send messages, attach files, embed links, and manage threads
+in that forum.
 
 Database migrations run automatically before the web service starts.
 

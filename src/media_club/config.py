@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     discord_bot_token: SecretStr | None = None
     discord_application_id: int | None = None
     discord_guild_id: int | None = None
+    discord_movie_forum_channel_id: int | None = None
+    discord_movie_tag_name: str = "Movies"
     tmdb_read_access_token: SecretStr | None = None
     tmdb_language: str = "en-US"
     tmdb_region: str = "US"

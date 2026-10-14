@@ -1,8 +1,9 @@
 import asyncio
+from datetime import date
 
 import httpx
 
-from media_club.tmdb import TmdbClient
+from media_club.tmdb import TmdbClient, TmdbMovie
 
 
 def test_search_movies_normalizes_results_and_authenticates() -> None:
@@ -61,5 +62,36 @@ def test_search_movies_ignores_malformed_results() -> None:
         movies = await client.search_movies("bad data")
         await client.close()
         assert movies == []
+
+    asyncio.run(scenario())
+
+
+def test_download_poster_does_not_send_api_token_to_image_host() -> None:
+    async def scenario() -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            assert request.url.host == "image.tmdb.org"
+            assert "Authorization" not in request.headers
+            return httpx.Response(200, content=b"poster-bytes")
+
+        client = TmdbClient(
+            "secret-token",
+            http_client=httpx.AsyncClient(
+                base_url="https://api.themoviedb.org/3",
+                transport=httpx.MockTransport(handler),
+            ),
+        )
+        movie = TmdbMovie(
+            id=348,
+            title="Alien",
+            original_title="Alien",
+            release_date=date(1979, 5, 25),
+            overview="",
+            poster_path="/poster.jpg",
+            payload={},
+        )
+        poster = await client.download_poster(movie)
+        await client.close()
+
+        assert poster == b"poster-bytes"
 
     asyncio.run(scenario())
