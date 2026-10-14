@@ -12,7 +12,7 @@ from media_club.log_ui import (
     EditChoiceView,
     LogDependencies,
     LogsView,
-    ManualLogModal,
+    ManualMediaModal,
     MovieLogStartView,
 )
 from media_club.logging_workflow import ForumPublisher, MediaDraft
@@ -135,7 +135,7 @@ class GhoulBot(discord.Client):
                 )
                 return
             await interaction.response.send_modal(
-                ManualLogModal(
+                ManualMediaModal(
                     MediaDraft(kind=media_kind, title=clean_title),
                     self.log_dependencies,
                 )

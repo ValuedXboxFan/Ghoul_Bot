@@ -11,7 +11,6 @@ from media_club.config import Settings
 from media_club.log_ui import (
     LogDependencies,
     LogDetailsModal,
-    ManualLogModal,
     ManualMediaModal,
     MovieArtworkView,
     MovieSearchModal,
@@ -123,29 +122,6 @@ def test_half_star_rating_display() -> None:
     assert rating_stars(Decimal("3.5")) == "⭐⭐⭐½☆ (3.5)"
 
 
-def test_long_review_is_split_across_valid_embed_fields() -> None:
-    item = MediaItem(
-        id=1,
-        media_type="book",
-        provider="manual",
-        provider_id="book-1",
-        title="A Long Book",
-        provider_payload={},
-    )
-    media_log = MediaLog(
-        id=8,
-        media_item_id=1,
-        discord_user_id=42,
-        review="x" * 1800,
-        media_item=item,
-    )
-
-    embed = log_embed(cast(discord.User, FakeUser()), media_log)
-
-    assert [field.name for field in embed.fields] == ["Review", "Review (continued)"]
-    assert [len(field.value) for field in embed.fields] == [1024, 776]
-
-
 def test_modal_layouts_and_command_tree_construct() -> None:
     dependencies = LogDependencies(
         repository=cast(object, None),
@@ -155,8 +131,7 @@ def test_modal_layouts_and_command_tree_construct() -> None:
     draft = MediaDraft(kind="book", title="")
 
     assert len(MovieSearchModal(dependencies).to_components()) == 1
-    assert len(ManualLogModal(draft, dependencies).to_components()) == 5
-    assert len(ManualMediaModal(draft, dependencies, replacement_log_id=1).to_components()) == 2
+    assert len(ManualMediaModal(draft, dependencies).to_components()) == 2
     assert len(LogDetailsModal(draft, dependencies).to_components()) == 4
 
     bot = GhoulBot(
