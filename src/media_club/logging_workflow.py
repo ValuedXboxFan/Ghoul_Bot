@@ -22,6 +22,7 @@ class MediaDraft:
     kind: MediaKind
     title: str
     tmdb_movie: TmdbMovie | None = None
+    selected_poster_path: str | None = None
     artwork_data: bytes | None = None
     artwork_content_type: str | None = None
     artwork_filename: str | None = None
@@ -126,7 +127,7 @@ class ForumPublisher:
             raise ForumConfigurationError(f'The configured forum does not have a "{tag_name}" tag.')
 
         media_log.media_item = item
-        artwork = await self.artwork(item)
+        artwork = await self.artwork(media_log, item)
         if artwork is None:
             created = await forum.create_thread(
                 name=display_title(item),
@@ -167,13 +168,13 @@ class ForumPublisher:
             allowed_mentions=discord.AllowedMentions.none(),
         )
 
-    async def artwork(self, item: MediaItem) -> Artwork | None:
-        """Resolve stored manual artwork or download provider artwork."""
+    async def artwork(self, media_log: MediaLog, item: MediaItem) -> Artwork | None:
+        """Resolve manual artwork or the poster chosen for this specific log."""
         if item.artwork_data is not None:
             filename = Path(item.artwork_filename or "artwork.jpg").name
             return Artwork(item.artwork_data, filename)
-        if item.provider == "tmdb" and self.tmdb is not None:
-            data = await self.tmdb.download_poster_path(item.poster_path)
+        if item.provider == "tmdb" and self.tmdb is not None and media_log.poster_path is not None:
+            data = await self.tmdb.download_poster_path(media_log.poster_path)
             if data is not None:
                 return Artwork(data, f"tmdb-{item.provider_id}-poster.jpg")
         return None

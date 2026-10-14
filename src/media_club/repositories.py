@@ -88,6 +88,7 @@ class MediaRepository:
         review: str | None,
         rating: Decimal | None,
         activity_date: date | None,
+        poster_path: str | None = None,
     ) -> MediaLog:
         """Create a member-owned log record without assuming a forum post."""
         async with self.database.sessions() as session:
@@ -97,6 +98,7 @@ class MediaRepository:
                 review=review,
                 rating=rating,
                 activity_date=activity_date,
+                poster_path=poster_path,
             )
             session.add(media_log)
             await session.commit()
@@ -188,6 +190,7 @@ class MediaRepository:
         async with self.database.sessions() as session:
             media_log = await self._load_log(session, log_id)
             media_log.media_item_id = media_item_id
+            media_log.poster_path = None
             media_log.forum_thread_id = thread_id
             media_log.forum_message_id = message_id
             await session.commit()

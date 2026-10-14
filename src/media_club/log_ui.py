@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from contextlib import suppress
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
@@ -338,13 +338,13 @@ class MovieArtworkView(OwnedView):
         poster_path = (
             self.poster_paths[self.selected_index] if self.selected_index is not None else None
         )
-        selected_movie = replace(self.movie, poster_path=poster_path)
         await interaction.response.send_modal(
             LogDetailsModal(
                 MediaDraft(
                     kind="movie",
-                    title=selected_movie.title,
-                    tmdb_movie=selected_movie,
+                    title=self.movie.title,
+                    tmdb_movie=self.movie,
+                    selected_poster_path=poster_path,
                 ),
                 self.dependencies,
             )
@@ -671,6 +671,7 @@ async def save_new_log(
             review=log_data.review,
             rating=log_data.rating,
             activity_date=log_data.activity_date,
+            poster_path=draft.selected_poster_path,
         )
     except SQLAlchemyError as error:
         logger.exception("Could not persist media log")
@@ -896,7 +897,7 @@ async def replace_media_details(
 
     try:
         if draft.artwork_data is None:
-            existing_art = await dependencies.publisher.artwork(media_log.media_item)
+            existing_art = await dependencies.publisher.artwork(media_log, media_log.media_item)
             if existing_art is not None:
                 draft.artwork_data = existing_art.data
                 draft.artwork_filename = existing_art.filename
