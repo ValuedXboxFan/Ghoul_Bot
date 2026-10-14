@@ -11,7 +11,7 @@ from media_club.log_ui import (
     LogDependencies,
     LogsView,
     ManualMediaModal,
-    MovieSearchModal,
+    MovieLogStartView,
 )
 from media_club.logging_workflow import ForumPublisher, MediaDraft
 from media_club.media_types import MediaKind
@@ -87,7 +87,11 @@ class GhoulBot(discord.Client):
 
         @log_group.command(name="movie", description="Log a movie")
         async def log_movie(interaction: discord.Interaction) -> None:
-            await interaction.response.send_modal(MovieSearchModal(self.log_dependencies))
+            await interaction.response.send_message(
+                "How would you like to add this movie?",
+                view=MovieLogStartView(interaction.user.id, self.log_dependencies),
+                ephemeral=True,
+            )
 
         async def start_manual_log(
             interaction: discord.Interaction,
@@ -129,6 +133,21 @@ class GhoulBot(discord.Client):
             await start_manual_log(interaction, "other")
 
         self.tree.add_command(log_group, guild=self.guild)
+
+        @self.tree.command(name="about", description="View Ghoul Bot credits and data sources")
+        @app_commands.guilds(self.guild)
+        async def about(interaction: discord.Interaction) -> None:
+            embed = discord.Embed(
+                title="About Ghoul Bot",
+                description=(
+                    "Ghoul Bot helps this server log and discuss movies and other media.\n\n"
+                    "Movie data and artwork are supplied by "
+                    "[The Movie Database (TMDB)](https://www.themoviedb.org/).\n\n"
+                    "This product uses the TMDB API but is not endorsed or certified by TMDB."
+                ),
+                color=discord.Color.dark_teal(),
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
 
         async def owned_thread_log(interaction: discord.Interaction) -> MediaLog | None:
             channel = interaction.channel

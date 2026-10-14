@@ -12,7 +12,7 @@ from media_club.log_ui import (
     LogDetailsModal,
     ManualMediaModal,
     MovieSearchModal,
-    parse_activity_date,
+    parse_activity_date_parts,
     rating_options,
 )
 from media_club.logging_workflow import (
@@ -21,6 +21,7 @@ from media_club.logging_workflow import (
     display_title,
     log_content,
     log_embed,
+    rating_stars,
 )
 from media_club.models import MediaItem, MediaLog
 
@@ -37,12 +38,14 @@ class FakeUser:
 
 
 def test_optional_date_is_not_defaulted() -> None:
-    assert parse_activity_date("") is None
-    assert parse_activity_date("2026-10-14") == date(2026, 10, 14)
+    assert parse_activity_date_parts("", "", "") is None
+    assert parse_activity_date_parts("10", "14", "2026") == date(2026, 10, 14)
     with pytest.raises(ValueError):
-        parse_activity_date("10/14/2026")
+        parse_activity_date_parts("10", "", "2026")
     with pytest.raises(ValueError):
-        parse_activity_date("2026-02-30")
+        parse_activity_date_parts("2", "30", "2026")
+    with pytest.raises(ValueError):
+        parse_activity_date_parts("10", "14", "26")
 
 
 def test_rating_options_are_strict_half_steps() -> None:
@@ -87,11 +90,17 @@ def test_movie_title_and_reviewer_snapshot_render_in_post() -> None:
     assert embed.author.name == "Ghoul Friend's log"
     assert embed.author.icon_url == "https://cdn.example/avatar.png"
     assert embed.description is None
-    assert embed.fields[0].value == "5/5"
+    assert embed.fields[0].name == "Rating"
+    assert embed.fields[0].value == "⭐⭐⭐⭐⭐ (5)"
+    assert embed.fields[1].name == "Review"
+    assert embed.fields[1].value == "Still terrifying."
     assert "log #7" in (embed.footer.text or "")
-    assert log_content(cast(discord.User, FakeUser()), media_log) == (
-        "**Review by <@42>**\n\nStill terrifying."
-    )
+    assert "Data & artwork from TMDB" in (embed.footer.text or "")
+    assert log_content(cast(discord.User, FakeUser()), media_log) == "**Logged by <@42>**"
+
+
+def test_half_star_rating_display() -> None:
+    assert rating_stars(Decimal("3.5")) == "⭐⭐⭐½☆ (3.5)"
 
 
 def test_modal_layouts_and_command_tree_construct() -> None:
@@ -104,7 +113,7 @@ def test_modal_layouts_and_command_tree_construct() -> None:
 
     assert len(MovieSearchModal(dependencies).to_components()) == 1
     assert len(ManualMediaModal(draft, dependencies).to_components()) == 2
-    assert len(LogDetailsModal(draft, dependencies).to_components()) == 4
+    assert len(LogDetailsModal(draft, dependencies).to_components()) == 5
 
     bot = GhoulBot(
         Settings(discord_application_id=1, discord_guild_id=2),
@@ -113,7 +122,7 @@ def test_modal_layouts_and_command_tree_construct() -> None:
     )
     commands = bot.tree.get_commands(guild=bot.guild)
     command_names = {command.name for command in commands}
-    assert command_names == {"ping", "status", "log", "edit", "delete", "logs"}
+    assert command_names == {"ping", "status", "about", "log", "edit", "delete", "logs"}
     log_group = next(command for command in commands if command.name == "log")
     assert isinstance(log_group, discord.app_commands.Group)
     assert {command.name for command in log_group.commands} == {

@@ -98,6 +98,33 @@ class TmdbClient:
                 break
         return movies
 
+    async def movie_poster_paths(self, movie_id: int, *, limit: int = 10) -> list[str]:
+        """Return the best available poster paths for a TMDB movie."""
+        language = self.language.split("-", maxsplit=1)[0]
+        try:
+            response = await self.http.get(
+                f"/movie/{movie_id}/images",
+                headers={"Authorization": f"Bearer {self.access_token}"},
+                params={"include_image_language": f"{language},null"},
+            )
+            response.raise_for_status()
+        except httpx.HTTPError as error:
+            raise TmdbError("TMDB poster lookup failed") from error
+
+        payload = response.json()
+        raw_posters = payload.get("posters", []) if isinstance(payload, dict) else []
+        if not isinstance(raw_posters, list):
+            raise TmdbError("TMDB returned an unexpected poster list")
+
+        posters: list[str] = []
+        for raw_poster in raw_posters:
+            path = raw_poster.get("file_path") if isinstance(raw_poster, dict) else None
+            if isinstance(path, str) and path and path not in posters:
+                posters.append(path)
+            if len(posters) >= limit:
+                break
+        return posters
+
     async def download_poster(self, movie: TmdbMovie) -> bytes | None:
         """Download poster artwork for upload to Discord."""
         return await self.download_poster_path(movie.poster_path)

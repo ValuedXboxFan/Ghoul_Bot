@@ -75,14 +75,17 @@ immediately without waiting for global command propagation:
 
 - `/ping` confirms the Gateway connection and displays latency.
 - `/status` reports the active environment and PostgreSQL connectivity.
-- `/log movie` searches TMDB and always includes an **Enter manually** fallback.
+- `/log movie` first offers **Search TMDB** or **Enter manually**. A matched movie includes
+  a preview picker for its available TMDB poster artwork.
 - `/log tv_show`, `/log book`, `/log comic`, `/log podcast`, `/log music`,
   `/log video_game`, and `/log other` collect a title and optional artwork manually.
 - Every log can include an optional review, strict 1–5 half-step rating, and optional
-  activity date. Members can save a private history record without creating a forum post.
+  activity date entered as separate month, day, and year fields. Members then choose
+  whether to create a forum post or save only a private history record.
 - `/edit` and `/delete` operate only inside a registered forum post and only for its
   registered owner.
 - `/logs` privately manages history records that do not have a forum post.
+- `/about` shows Ghoul Bot's credits and data-source attribution.
 
 Set `DISCORD_MEDIA_FORUM_CHANNEL_ID` to the target forum channel ID. The legacy
 `DISCORD_MOVIE_FORUM_CHANNEL_ID` variable also remains supported. Create these forum
