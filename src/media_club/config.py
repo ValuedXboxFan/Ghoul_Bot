@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     discord_bot_token: SecretStr | None = None
     discord_application_id: int | None = None
     discord_guild_id: int | None = None
+    tmdb_read_access_token: SecretStr | None = None
+    tmdb_language: str = "en-US"
+    tmdb_region: str = "US"
 
     @property
     def discord_configured(self) -> bool:
