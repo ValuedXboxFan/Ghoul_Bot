@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import logging
 from contextlib import suppress
-from dataclasses import dataclass, replace
-from datetime import date
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 import discord
 from sqlalchemy.exc import SQLAlchemyError
@@ -24,6 +25,8 @@ from media_club.tmdb import TMDB_IMAGE_URL, TmdbClient, TmdbError, TmdbMovie
 logger = logging.getLogger(__name__)
 
 RATINGS = tuple(Decimal(value) / 2 for value in range(2, 11))
+ACTIVITY_TIMEZONE = ZoneInfo("America/Chicago")
+LOGS_PAGE_SIZE = 25
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,19 +57,32 @@ def rating_options(selected: Decimal | None = None) -> list[discord.SelectOption
     ]
 
 
-def parse_activity_date_parts(month: str, day: str, year: str) -> date | None:
-    """Validate separate numeric date fields, allowing a wholly blank date."""
-    parts = tuple(value.strip() for value in (month, day, year))
-    if not any(parts):
+def default_activity_date(now: datetime | None = None) -> date:
+    """Return the server's activity day, whose boundary is 4 AM Chicago time."""
+    local_now = now.astimezone(ACTIVITY_TIMEZONE) if now else datetime.now(ACTIVITY_TIMEZONE)
+    return (local_now - timedelta(hours=4)).date()
+
+
+def format_activity_date(value: date) -> str:
+    """Render a date using the member-facing month/day/year format."""
+    return f"{value.month}/{value.day}/{value.year}"
+
+
+def parse_activity_date(value: str) -> date | None:
+    """Parse M/D/YY or M/D/YYYY while preserving an intentionally blank value."""
+    clean = value.strip()
+    if not clean:
         return None
-    if not all(parts):
-        raise ValueError("Enter month, day, and year—or leave all three blank")
-    if not all(value.isdigit() for value in parts):
-        raise ValueError("Month, day, and year must be numbers")
-    month_value, day_value, year_value = (int(value) for value in parts)
-    if len(parts[2]) != 4:
-        raise ValueError("Use a four-digit year")
-    return date(year_value, month_value, day_value)
+    parts = clean.split("/")
+    if len(parts) != 3 or not all(part.isdigit() for part in parts):
+        raise ValueError("Use Month/Day/Year format")
+    month, day, year = parts
+    if not 1 <= len(month) <= 2 or not 1 <= len(day) <= 2 or len(year) not in (2, 4):
+        raise ValueError("Use Month/Day/Year format")
+    year_value = int(year)
+    if len(year) == 2:
+        year_value += 2000 if year_value <= 49 else 1900
+    return date(year_value, int(month), int(day))
 
 
 def selected_rating(select: discord.ui.Select[discord.ui.Modal]) -> Decimal | None:
@@ -110,11 +126,28 @@ class OwnedView(discord.ui.View):
         return False
 
 
+class OwnedLayoutView(discord.ui.LayoutView):
+    """Base Components V2 layout restricted to the member who started it."""
+
+    def __init__(self, owner_id: int, *, timeout: float = 300) -> None:
+        super().__init__(timeout=timeout)
+        self.owner_id = owner_id
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.owner_id:
+            return True
+        await interaction.response.send_message(
+            "This control belongs to another member.", ephemeral=True
+        )
+        return False
+
+
 class MovieLogStartView(OwnedView):
     """Let a member choose lookup or manual entry before searching TMDB."""
 
-    def __init__(self, owner_id: int, dependencies: LogDependencies) -> None:
+    def __init__(self, owner_id: int, title: str, dependencies: LogDependencies) -> None:
         super().__init__(owner_id)
+        self.title = title
         self.dependencies = dependencies
 
     @discord.ui.button(label="Search TMDB", style=discord.ButtonStyle.primary, emoji="🔎")
@@ -123,7 +156,8 @@ class MovieLogStartView(OwnedView):
         interaction: discord.Interaction,
         _button: discord.ui.Button[MovieLogStartView],
     ) -> None:
-        await interaction.response.send_modal(MovieSearchModal(self.dependencies))
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        await present_movie_results(interaction, self.title, self.dependencies)
 
     @discord.ui.button(label="Enter manually", style=discord.ButtonStyle.secondary, emoji="✏️")
     async def manual(
@@ -132,7 +166,7 @@ class MovieLogStartView(OwnedView):
         _button: discord.ui.Button[MovieLogStartView],
     ) -> None:
         await interaction.response.send_modal(
-            ManualMediaModal(MediaDraft(kind="movie", title=""), self.dependencies)
+            ManualMediaModal(MediaDraft(kind="movie", title=self.title), self.dependencies)
         )
 
 
@@ -166,43 +200,52 @@ class MovieSearchModal(discord.ui.Modal):
     async def on_submit(self, interaction: discord.Interaction) -> None:
         query = str(self.query_input).strip()
         await interaction.response.defer(ephemeral=True, thinking=True)
-        if self.dependencies.tmdb is None:
-            await interaction.followup.send(
-                "Movie lookup is unavailable. You can still enter it manually.",
-                view=ManualStartView(
-                    interaction.user.id,
-                    MediaDraft(kind="movie", title=query),
-                    self.dependencies,
-                ),
-                ephemeral=True,
-            )
-            return
-        try:
-            movies = await self.dependencies.tmdb.search_movies(query)
-        except TmdbError:
-            logger.exception("TMDB lookup failed during movie log")
-            movies = []
-        if not movies:
-            await interaction.followup.send(
-                "No useful movie results were found. You can enter it manually.",
-                view=ManualStartView(
-                    interaction.user.id,
-                    MediaDraft(kind="movie", title=query),
-                    self.dependencies,
-                ),
-                ephemeral=True,
-            )
-            return
+        await present_movie_results(interaction, query, self.dependencies)
+
+
+async def present_movie_results(
+    interaction: discord.Interaction,
+    query: str,
+    dependencies: LogDependencies,
+) -> None:
+    """Search TMDB and display results after an interaction has been deferred."""
+    if dependencies.tmdb is None:
         await interaction.followup.send(
-            "Choose the correct movie:",
-            view=MovieLookupView(
+            "Movie lookup is unavailable. You can still enter it manually.",
+            view=ManualStartView(
                 interaction.user.id,
-                query,
-                movies,
-                self.dependencies,
+                MediaDraft(kind="movie", title=query),
+                dependencies,
             ),
             ephemeral=True,
         )
+        return
+    try:
+        movies = await dependencies.tmdb.search_movies(query)
+    except TmdbError:
+        logger.exception("TMDB lookup failed during movie log")
+        movies = []
+    if not movies:
+        await interaction.followup.send(
+            "No useful movie results were found. You can enter it manually.",
+            view=ManualStartView(
+                interaction.user.id,
+                MediaDraft(kind="movie", title=query),
+                dependencies,
+            ),
+            ephemeral=True,
+        )
+        return
+    await interaction.followup.send(
+        "Choose the correct movie:",
+        view=MovieLookupView(
+            interaction.user.id,
+            query,
+            movies,
+            dependencies,
+        ),
+        ephemeral=True,
+    )
 
 
 class ManualStartView(OwnedView):
@@ -270,8 +313,8 @@ class MovieLookupSelect(discord.ui.Select[MovieLookupView]):
             self.dependencies,
         )
         await interaction.edit_original_response(
-            content="Choose the artwork for this post, then continue:",
-            embed=view.preview_embed(),
+            content=None,
+            embed=None,
             view=view,
         )
 
@@ -297,11 +340,22 @@ class MovieArtworkSelect(discord.ui.Select["MovieArtworkView"]):
         self.view.selected_index = None if self.values[0] == "none" else int(self.values[0])
         for option in self.options:
             option.default = option.value == self.values[0]
-        await interaction.response.edit_message(embed=self.view.preview_embed(), view=self.view)
+        self.view.update_instructions()
+        await interaction.response.edit_message(view=self.view)
 
 
-class MovieArtworkView(OwnedView):
-    """Preview and select one of TMDB's available movie posters."""
+class MovieArtworkContinueButton(discord.ui.Button["MovieArtworkView"]):
+    def __init__(self) -> None:
+        super().__init__(label="Continue", style=discord.ButtonStyle.primary)
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        if self.view is None:
+            return
+        await self.view.continue_log(interaction)
+
+
+class MovieArtworkView(OwnedLayoutView):
+    """Show five TMDB posters together and retain the member's selection."""
 
     def __init__(
         self,
@@ -312,39 +366,53 @@ class MovieArtworkView(OwnedView):
     ) -> None:
         super().__init__(owner_id)
         self.movie = movie
-        self.poster_paths = poster_paths[:10]
+        self.poster_paths = poster_paths[:5]
         self.selected_index: int | None = 0 if self.poster_paths else None
         self.dependencies = dependencies
-        self.add_item(MovieArtworkSelect(self.poster_paths))
+        self.instructions: discord.ui.TextDisplay[MovieArtworkView] = discord.ui.TextDisplay("")
+        self.update_instructions()
+        self.add_item(self.instructions)
+        if self.poster_paths:
+            self.add_item(
+                discord.ui.MediaGallery(
+                    *[
+                        discord.MediaGalleryItem(
+                            f"{TMDB_IMAGE_URL}{path}",
+                            description=f"Poster {index + 1} for {movie.display_title}",
+                        )
+                        for index, path in enumerate(self.poster_paths)
+                    ]
+                )
+            )
+        self.add_item(discord.ui.ActionRow(MovieArtworkSelect(self.poster_paths)))
+        self.add_item(discord.ui.ActionRow(MovieArtworkContinueButton()))
 
-    def preview_embed(self) -> discord.Embed:
-        embed = discord.Embed(
-            title=self.movie.display_title,
-            description=self.movie.overview[:500] or None,
-            color=discord.Color.dark_teal(),
+    def update_instructions(self) -> None:
+        selected = (
+            f"Poster {self.selected_index + 1} selected."
+            if self.selected_index is not None
+            else "No artwork selected."
         )
-        if self.selected_index is not None:
-            embed.set_image(url=f"{TMDB_IMAGE_URL}{self.poster_paths[self.selected_index]}")
-        else:
-            embed.set_footer(text="No artwork selected")
-        return embed
+        self.instructions.content = (
+            f"## {self.movie.display_title}\n"
+            "Choose from the first five available posters, numbered left-to-right and "
+            f"top-to-bottom. **{selected}**"
+        )
 
-    @discord.ui.button(label="Continue", style=discord.ButtonStyle.primary)
     async def continue_log(
         self,
         interaction: discord.Interaction,
-        _button: discord.ui.Button[MovieArtworkView],
     ) -> None:
         poster_path = (
             self.poster_paths[self.selected_index] if self.selected_index is not None else None
         )
-        selected_movie = replace(self.movie, poster_path=poster_path)
         await interaction.response.send_modal(
             LogDetailsModal(
                 MediaDraft(
                     kind="movie",
-                    title=selected_movie.title,
-                    tmdb_movie=selected_movie,
+                    title=self.movie.title,
+                    tmdb_movie=self.movie,
+                    selected_poster_path=poster_path,
                 ),
                 self.dependencies,
             )
@@ -483,7 +551,7 @@ class ContinueLogView(OwnedView):
 
 
 class LogDetailsModal(discord.ui.Modal):
-    """Collect optional review, constrained rating, and separate date parts."""
+    """Collect member log data and whether to create a forum post."""
 
     def __init__(
         self,
@@ -491,6 +559,7 @@ class LogDetailsModal(discord.ui.Modal):
         dependencies: LogDependencies,
         *,
         initial: LogData | None = None,
+        publish: bool = True,
     ) -> None:
         super().__init__(title="Your log", timeout=600)
         self.draft = draft
@@ -509,24 +578,22 @@ class LogDetailsModal(discord.ui.Modal):
             max_values=1,
             required=True,
         )
-        initial_date = initial.activity_date if initial is not None else None
-        self.month_input: discord.ui.TextInput[LogDetailsModal] = discord.ui.TextInput(
-            default=str(initial_date.month) if initial_date else None,
-            placeholder="MM",
+        initial_date = initial.activity_date if initial is not None else default_activity_date()
+        self.date_input: discord.ui.TextInput[LogDetailsModal] = discord.ui.TextInput(
+            default=format_activity_date(initial_date) if initial_date else None,
+            placeholder="Month/Day/Year",
             required=False,
-            max_length=2,
+            max_length=10,
         )
-        self.day_input: discord.ui.TextInput[LogDetailsModal] = discord.ui.TextInput(
-            default=str(initial_date.day) if initial_date else None,
-            placeholder="DD",
-            required=False,
-            max_length=2,
-        )
-        self.year_input: discord.ui.TextInput[LogDetailsModal] = discord.ui.TextInput(
-            default=str(initial_date.year) if initial_date else None,
-            placeholder="YYYY",
-            required=False,
-            max_length=4,
+        self.publish_input: discord.ui.Select[LogDetailsModal] = discord.ui.Select(
+            placeholder="Create a forum post?",
+            options=[
+                discord.SelectOption(label="Yes", value="yes", default=publish),
+                discord.SelectOption(label="No", value="no", default=not publish),
+            ],
+            min_values=1,
+            max_values=1,
+            required=True,
         )
         self.add_item(
             discord.ui.Label(
@@ -544,28 +611,29 @@ class LogDetailsModal(discord.ui.Modal):
         )
         self.add_item(
             discord.ui.Label(
-                text="Month (optional)",
-                description="Leave all three date fields blank to record no date",
-                component=self.month_input,
+                text="Date (optional)",
+                description="Month/Day/Year; leave blank to record no date",
+                component=self.date_input,
             )
         )
-        self.add_item(discord.ui.Label(text="Day (optional)", component=self.day_input))
-        self.add_item(discord.ui.Label(text="Year (optional)", component=self.year_input))
+        self.add_item(
+            discord.ui.Label(
+                text="Create forum post?",
+                description="Choose No to save only in your log history",
+                component=self.publish_input,
+            )
+        )
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         try:
             log_data = LogData(
                 review=str(self.review_input).strip() or None,
                 rating=selected_rating(self.rating_input),
-                activity_date=parse_activity_date_parts(
-                    str(self.month_input),
-                    str(self.day_input),
-                    str(self.year_input),
-                ),
+                activity_date=parse_activity_date(str(self.date_input)),
             )
         except ValueError:
             await interaction.response.send_message(
-                "Enter a real numeric month, day, and four-digit year—or leave all three blank.",
+                "Enter a real date as `Month/Day/Year`, such as `10/14/2026` or `10/14/26`.",
                 view=LogDetailsRetryView(
                     interaction.user.id,
                     self.draft,
@@ -575,20 +643,19 @@ class LogDetailsModal(discord.ui.Modal):
                         rating=selected_rating(self.rating_input),
                         activity_date=None,
                     ),
+                    self.publish_input.values[0] == "yes",
                 ),
                 ephemeral=True,
             )
             return
 
-        await interaction.response.send_message(
-            f"How would you like to save **{self.draft.title}**?",
-            view=LogDestinationView(
-                interaction.user.id,
-                self.draft,
-                log_data,
-                self.dependencies,
-            ),
-            ephemeral=True,
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        await save_new_log(
+            interaction,
+            self.draft,
+            log_data,
+            self.dependencies,
+            publish=self.publish_input.values[0] == "yes",
         )
 
 
@@ -599,11 +666,13 @@ class LogDetailsRetryView(OwnedView):
         draft: MediaDraft,
         dependencies: LogDependencies,
         initial: LogData,
+        publish: bool,
     ) -> None:
         super().__init__(owner_id)
         self.draft = draft
         self.dependencies = dependencies
         self.initial = initial
+        self.publish = publish
 
     @discord.ui.button(label="Correct the date", style=discord.ButtonStyle.primary)
     async def retry(
@@ -616,42 +685,9 @@ class LogDetailsRetryView(OwnedView):
                 self.draft,
                 self.dependencies,
                 initial=self.initial,
+                publish=self.publish,
             )
         )
-
-
-class LogDestinationView(OwnedView):
-    """Choose whether a validated log creates a forum post or remains private."""
-
-    def __init__(
-        self,
-        owner_id: int,
-        draft: MediaDraft,
-        log_data: LogData,
-        dependencies: LogDependencies,
-    ) -> None:
-        super().__init__(owner_id)
-        self.draft = draft
-        self.log_data = log_data
-        self.dependencies = dependencies
-
-    @discord.ui.button(label="Post to forum", style=discord.ButtonStyle.primary)
-    async def post_to_forum(
-        self,
-        interaction: discord.Interaction,
-        _button: discord.ui.Button[LogDestinationView],
-    ) -> None:
-        await interaction.response.edit_message(content="Saving and creating the post…", view=None)
-        await save_new_log(interaction, self.draft, self.log_data, self.dependencies, publish=True)
-
-    @discord.ui.button(label="Save privately", style=discord.ButtonStyle.secondary)
-    async def save_privately(
-        self,
-        interaction: discord.Interaction,
-        _button: discord.ui.Button[LogDestinationView],
-    ) -> None:
-        await interaction.response.edit_message(content="Saving your private log…", view=None)
-        await save_new_log(interaction, self.draft, self.log_data, self.dependencies, publish=False)
 
 
 async def save_new_log(
@@ -671,6 +707,7 @@ async def save_new_log(
             review=log_data.review,
             rating=log_data.rating,
             activity_date=log_data.activity_date,
+            poster_path=draft.selected_poster_path,
         )
     except SQLAlchemyError as error:
         logger.exception("Could not persist media log")
@@ -740,41 +777,25 @@ class EditLogModal(discord.ui.Modal):
             max_values=1,
             required=True,
         )
-        self.month_input: discord.ui.TextInput[EditLogModal] = discord.ui.TextInput(
-            default=str(media_log.activity_date.month) if media_log.activity_date else None,
-            placeholder="MM",
+        self.date_input: discord.ui.TextInput[EditLogModal] = discord.ui.TextInput(
+            default=(
+                format_activity_date(media_log.activity_date) if media_log.activity_date else None
+            ),
+            placeholder="Month/Day/Year",
             required=False,
-            max_length=2,
-        )
-        self.day_input: discord.ui.TextInput[EditLogModal] = discord.ui.TextInput(
-            default=str(media_log.activity_date.day) if media_log.activity_date else None,
-            placeholder="DD",
-            required=False,
-            max_length=2,
-        )
-        self.year_input: discord.ui.TextInput[EditLogModal] = discord.ui.TextInput(
-            default=str(media_log.activity_date.year) if media_log.activity_date else None,
-            placeholder="YYYY",
-            required=False,
-            max_length=4,
+            max_length=10,
         )
         self.add_item(discord.ui.Label(text="Review (optional)", component=self.review_input))
         self.add_item(discord.ui.Label(text="Rating (optional)", component=self.rating_input))
-        self.add_item(discord.ui.Label(text="Month (optional)", component=self.month_input))
-        self.add_item(discord.ui.Label(text="Day (optional)", component=self.day_input))
-        self.add_item(discord.ui.Label(text="Year (optional)", component=self.year_input))
+        self.add_item(discord.ui.Label(text="Date (optional)", component=self.date_input))
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         try:
-            activity_date = parse_activity_date_parts(
-                str(self.month_input),
-                str(self.day_input),
-                str(self.year_input),
-            )
+            activity_date = parse_activity_date(str(self.date_input))
             rating = selected_rating(self.rating_input)
         except ValueError:
             await interaction.response.send_message(
-                "Enter a real numeric month, day, and four-digit year—or leave all three blank. "
+                "Enter a real date as `Month/Day/Year`, such as `10/14/2026` or `10/14/26`. "
                 "Please run `/edit` again.",
                 ephemeral=True,
             )
@@ -896,7 +917,7 @@ async def replace_media_details(
 
     try:
         if draft.artwork_data is None:
-            existing_art = await dependencies.publisher.artwork(media_log.media_item)
+            existing_art = await dependencies.publisher.artwork(media_log, media_log.media_item)
             if existing_art is not None:
                 draft.artwork_data = existing_art.data
                 draft.artwork_filename = existing_art.filename
@@ -989,19 +1010,26 @@ class DeleteConfirmationView(OwnedView):
 
 
 class LogsView(OwnedView):
-    """Manage private logs that do not have a forum post."""
+    """Browse and manage a paginated history of all member-owned logs."""
 
     def __init__(
         self,
         owner_id: int,
         logs: list[MediaLog],
         dependencies: LogDependencies,
+        *,
+        page: int = 0,
+        has_next: bool = False,
     ) -> None:
         super().__init__(owner_id)
         self.logs = {media_log.id: media_log for media_log in logs}
         self.dependencies = dependencies
+        self.page = page
+        self.has_next = has_next
         self.selected_log_id: int | None = None
-        self.add_item(PrivateLogSelect(logs))
+        self.add_item(OwnedLogSelect(logs))
+        self.previous_page.disabled = page == 0
+        self.next_page.disabled = not has_next
 
     def selected(self) -> MediaLog | None:
         if self.selected_log_id is None:
@@ -1031,7 +1059,7 @@ class LogsView(OwnedView):
             await interaction.response.send_message("Choose a log first.", ephemeral=True)
             return
         await interaction.response.send_message(
-            "This replaces the title and optional artwork for the selected private log.",
+            "This replaces the title and optional artwork for the selected log.",
             view=MediaEditWarningView(
                 interaction.user.id,
                 media_log,
@@ -1060,20 +1088,69 @@ class LogsView(OwnedView):
             ephemeral=True,
         )
 
+    async def show_page(self, interaction: discord.Interaction, page: int) -> None:
+        results = await self.dependencies.repository.list_owned_logs(
+            self.owner_id,
+            offset=page * LOGS_PAGE_SIZE,
+            limit=LOGS_PAGE_SIZE + 1,
+        )
+        page_logs = results[:LOGS_PAGE_SIZE]
+        if not page_logs:
+            await interaction.response.send_message(
+                "There are no logs on that page.", ephemeral=True
+            )
+            return
 
-class PrivateLogSelect(discord.ui.Select[LogsView]):
+        current_select = next(
+            (item for item in self.children if isinstance(item, OwnedLogSelect)),
+            None,
+        )
+        if current_select is not None:
+            self.remove_item(current_select)
+        self.logs = {media_log.id: media_log for media_log in page_logs}
+        self.page = page
+        self.has_next = len(results) > LOGS_PAGE_SIZE
+        self.selected_log_id = None
+        self.previous_page.disabled = page == 0
+        self.next_page.disabled = not self.has_next
+        self.add_item(OwnedLogSelect(page_logs))
+        await interaction.response.edit_message(
+            content=f"Choose one of your logs — page {page + 1}:",
+            view=self,
+        )
+
+    @discord.ui.button(label="Previous", style=discord.ButtonStyle.secondary, row=2)
+    async def previous_page(
+        self,
+        interaction: discord.Interaction,
+        _button: discord.ui.Button[LogsView],
+    ) -> None:
+        await self.show_page(interaction, max(0, self.page - 1))
+
+    @discord.ui.button(label="Next", style=discord.ButtonStyle.secondary, row=2)
+    async def next_page(
+        self,
+        interaction: discord.Interaction,
+        _button: discord.ui.Button[LogsView],
+    ) -> None:
+        await self.show_page(interaction, self.page + 1)
+
+
+class OwnedLogSelect(discord.ui.Select[LogsView]):
     def __init__(self, logs: list[MediaLog]) -> None:
         options = [
             discord.SelectOption(
                 label=media_log.media_item.title[:100],
                 value=str(media_log.id),
                 description=(
-                    f"{MEDIA_TYPES[media_log.media_item.media_type].label} • Log #{media_log.id}"
+                    f"{MEDIA_TYPES[media_log.media_item.media_type].label} • "
+                    f"{'Forum post' if media_log.forum_thread_id else 'Private'} • "
+                    f"Log #{media_log.id}"
                 )[:100],
             )
             for media_log in logs
         ]
-        super().__init__(placeholder="Choose a private log", options=options)
+        super().__init__(placeholder="Choose one of your logs", options=options)
 
     async def callback(self, interaction: discord.Interaction) -> None:
         if self.view is None:
@@ -1082,7 +1159,8 @@ class PrivateLogSelect(discord.ui.Select[LogsView]):
         media_log = self.view.selected()
         if media_log is None:
             return
+        post_link = f" • <#{media_log.forum_thread_id}>" if media_log.forum_thread_id else ""
         await interaction.response.edit_message(
-            content=f"Selected **{media_log.media_item.title}** (`#{media_log.id}`).",
+            content=f"Selected **{media_log.media_item.title}** (`#{media_log.id}`){post_link}.",
             view=self.view,
         )

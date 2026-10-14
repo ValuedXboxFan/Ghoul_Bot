@@ -88,6 +88,7 @@ class MediaRepository:
         review: str | None,
         rating: Decimal | None,
         activity_date: date | None,
+        poster_path: str | None = None,
     ) -> MediaLog:
         """Create a member-owned log record without assuming a forum post."""
         async with self.database.sessions() as session:
@@ -97,6 +98,7 @@ class MediaRepository:
                 review=review,
                 rating=rating,
                 activity_date=activity_date,
+                poster_path=poster_path,
             )
             session.add(media_log)
             await session.commit()
@@ -144,17 +146,21 @@ class MediaRepository:
                 ),
             )
 
-    async def list_unposted_logs(self, discord_user_id: int, *, limit: int = 25) -> list[MediaLog]:
-        """Return recent private log records that do not have a forum post."""
+    async def list_owned_logs(
+        self,
+        discord_user_id: int,
+        *,
+        offset: int = 0,
+        limit: int = 25,
+    ) -> list[MediaLog]:
+        """Return a newest-first page of all logs owned by a member."""
         async with self.database.sessions() as session:
             result = await session.scalars(
                 select(MediaLog)
                 .options(joinedload(MediaLog.media_item))
-                .where(
-                    MediaLog.discord_user_id == discord_user_id,
-                    MediaLog.forum_thread_id.is_(None),
-                )
+                .where(MediaLog.discord_user_id == discord_user_id)
                 .order_by(MediaLog.created_at.desc())
+                .offset(offset)
                 .limit(limit)
             )
             return list(result.unique())
@@ -188,6 +194,7 @@ class MediaRepository:
         async with self.database.sessions() as session:
             media_log = await self._load_log(session, log_id)
             media_log.media_item_id = media_item_id
+            media_log.poster_path = None
             media_log.forum_thread_id = thread_id
             media_log.forum_message_id = message_id
             await session.commit()

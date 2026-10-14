@@ -73,18 +73,21 @@ Discord connectivity. It returns HTTP 503 until both dependencies are connected.
 The staging bot registers commands directly to `DISCORD_GUILD_ID`, so they appear
 immediately without waiting for global command propagation:
 
-- `/ping` confirms the Gateway connection and displays latency.
-- `/status` reports the active environment and PostgreSQL connectivity.
-- `/log` provides an inline type selector for Movies, TV Shows, Books, Comics, Podcasts,
-  Music, Video Games, and Other. Movies then offer **Search TMDB** or **Enter manually**;
-  a matched movie includes a preview picker for its available TMDB poster artwork. Other
-  types collect a title and optional artwork manually.
+- `/ping` confirms the Gateway connection and displays latency; it requires **Manage Server**.
+- `/status` reports the active environment and PostgreSQL connectivity; it requires
+  **Manage Server**.
+- `/log` requires an inline media type and title. Movies then offer **Search TMDB** or
+  **Enter manually**; the supplied title is searched directly or pre-populated for manual
+  entry. A matched movie shows its first five available TMDB posters together for selection.
+  Other types open manual entry with the supplied title already filled in.
 - Every log can include an optional review, strict 1–5 half-step rating, and optional
-  activity date entered as separate month, day, and year fields. Members then choose
-  whether to create a forum post or save only a private history record.
+  `Month/Day/Year` activity date. New logs default to the current Chicago activity day,
+  which changes at 4 AM. The same form defaults to creating a forum post but can save only
+  a private history record instead.
 - `/edit` and `/delete` operate only inside a registered forum post and only for its
   registered owner.
-- `/logs` privately manages history records that do not have a forum post.
+- `/mylogs` privately browses and edits both forum-posted and private history, newest first,
+  with pagination beyond 25 entries.
 - `/about` shows Ghoul Bot's credits and data-source attribution.
 
 Set `DISCORD_MEDIA_FORUM_CHANNEL_ID` to the target forum channel ID. The legacy
@@ -94,6 +97,19 @@ tags exactly as written: `Movies`, `TV Shows`, `Books`, `Comics`, `Podcasts`, `M
 embed links, and manage threads in that forum.
 
 Database migrations run automatically before the web service starts.
+
+## Media data model
+
+Provider-backed media is normalized separately from member activity:
+
+- `media_items` stores one shared item for each `(provider, provider_id)` pair, including the
+  canonical title and TMDB ID.
+- `media_logs` stores each member's individual date, rating, review, selected poster, and forum
+  post identifiers, referencing the shared item through `media_item_id`.
+
+This lets multiple members log the same TMDB movie without duplicating its identity, while
+preserving independent watches and presentation choices. The indexed relationship supports
+future queries for everyone who watched a particular movie and links back to their forum posts.
 
 Movie and television metadata is supplied by TMDB. This product uses the TMDB API
 but is not endorsed or certified by TMDB.

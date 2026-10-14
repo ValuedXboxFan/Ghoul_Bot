@@ -7,6 +7,7 @@ from discord import app_commands
 from media_club.config import Settings
 from media_club.database import Database
 from media_club.log_ui import (
+    LOGS_PAGE_SIZE,
     DeleteConfirmationView,
     EditChoiceView,
     LogDependencies,
@@ -61,6 +62,8 @@ class GhoulBot(discord.Client):
     def _register_commands(self, config: Settings) -> None:
         @self.tree.command(name="ping", description="Check whether Ghoul Bot is online")
         @app_commands.guilds(self.guild)
+        @app_commands.default_permissions(manage_guild=True)
+        @app_commands.checks.has_permissions(manage_guild=True)
         async def ping(interaction: discord.Interaction) -> None:
             latency_ms = round(self.latency * 1000)
             await interaction.response.send_message(
@@ -70,6 +73,8 @@ class GhoulBot(discord.Client):
 
         @self.tree.command(name="status", description="Check Ghoul Bot's dependencies")
         @app_commands.guilds(self.guild)
+        @app_commands.default_permissions(manage_guild=True)
+        @app_commands.checks.has_permissions(manage_guild=True)
         async def status(interaction: discord.Interaction) -> None:
             database_status = "connected" if await self.database.ping() else "unavailable"
             tmdb_status = "configured" if self.tmdb is not None else "not configured"
@@ -84,9 +89,27 @@ class GhoulBot(discord.Client):
                 ephemeral=True,
             )
 
+        async def operations_permission_error(
+            interaction: discord.Interaction,
+            error: app_commands.AppCommandError,
+        ) -> None:
+            if isinstance(error, app_commands.MissingPermissions):
+                await interaction.response.send_message(
+                    "You need the Manage Server permission to use that command.",
+                    ephemeral=True,
+                )
+                return
+            raise error
+
+        ping.error(operations_permission_error)
+        status.error(operations_permission_error)
+
         @self.tree.command(name="log", description="Log media you've experienced")
         @app_commands.guilds(self.guild)
-        @app_commands.describe(media_type="What kind of media are you logging?")
+        @app_commands.describe(
+            media_type="What kind of media are you logging?",
+            title="Title or search text",
+        )
         @app_commands.choices(
             media_type=[
                 app_commands.Choice(name=definition.tag_name, value=key)
@@ -96,18 +119,24 @@ class GhoulBot(discord.Client):
         async def log(
             interaction: discord.Interaction,
             media_type: app_commands.Choice[str],
+            title: app_commands.Range[str, 1, 100],
         ) -> None:
+            clean_title = title.strip()
             media_kind = cast(MediaKind, media_type.value)
             if media_kind == "movie":
                 await interaction.response.send_message(
                     "How would you like to add this movie?",
-                    view=MovieLogStartView(interaction.user.id, self.log_dependencies),
+                    view=MovieLogStartView(
+                        interaction.user.id,
+                        clean_title,
+                        self.log_dependencies,
+                    ),
                     ephemeral=True,
                 )
                 return
             await interaction.response.send_modal(
                 ManualMediaModal(
-                    MediaDraft(kind=media_kind, title=""),
+                    MediaDraft(kind=media_kind, title=clean_title),
                     self.log_dependencies,
                 )
             )
@@ -182,22 +211,25 @@ class GhoulBot(discord.Client):
                 ephemeral=True,
             )
 
-        @self.tree.command(name="logs", description="Manage logs without forum posts")
+        @self.tree.command(name="mylogs", description="Browse and edit your media logs")
         @app_commands.guilds(self.guild)
-        async def logs(interaction: discord.Interaction) -> None:
+        async def mylogs(interaction: discord.Interaction) -> None:
             await interaction.response.defer(ephemeral=True, thinking=True)
-            media_logs = await self.media_repository.list_unposted_logs(interaction.user.id)
+            results = await self.media_repository.list_owned_logs(
+                interaction.user.id,
+                limit=LOGS_PAGE_SIZE + 1,
+            )
+            media_logs = results[:LOGS_PAGE_SIZE]
             if not media_logs:
-                await interaction.followup.send(
-                    "You don't have any private logs without forum posts.", ephemeral=True
-                )
+                await interaction.followup.send("You haven't logged any media yet.", ephemeral=True)
                 return
             await interaction.followup.send(
-                "Choose one of your private logs:",
+                "Choose one of your logs — page 1:",
                 view=LogsView(
                     interaction.user.id,
                     media_logs,
                     self.log_dependencies,
+                    has_next=len(results) > LOGS_PAGE_SIZE,
                 ),
                 ephemeral=True,
             )

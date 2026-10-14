@@ -1,6 +1,7 @@
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from typing import cast
+from zoneinfo import ZoneInfo
 
 import discord
 import pytest
@@ -11,8 +12,10 @@ from media_club.log_ui import (
     LogDependencies,
     LogDetailsModal,
     ManualMediaModal,
+    MovieArtworkView,
     MovieSearchModal,
-    parse_activity_date_parts,
+    default_activity_date,
+    parse_activity_date,
     rating_options,
 )
 from media_club.logging_workflow import (
@@ -24,6 +27,7 @@ from media_club.logging_workflow import (
     rating_stars,
 )
 from media_club.models import MediaItem, MediaLog
+from media_club.tmdb import TmdbMovie
 
 
 class FakeAvatar:
@@ -38,14 +42,24 @@ class FakeUser:
 
 
 def test_optional_date_is_not_defaulted() -> None:
-    assert parse_activity_date_parts("", "", "") is None
-    assert parse_activity_date_parts("10", "14", "2026") == date(2026, 10, 14)
+    assert parse_activity_date("") is None
+    assert parse_activity_date("10/14/2026") == date(2026, 10, 14)
+    assert parse_activity_date("1/4/26") == date(2026, 1, 4)
+    assert parse_activity_date("12/31/99") == date(1999, 12, 31)
     with pytest.raises(ValueError):
-        parse_activity_date_parts("10", "", "2026")
+        parse_activity_date("10-14-2026")
     with pytest.raises(ValueError):
-        parse_activity_date_parts("2", "30", "2026")
+        parse_activity_date("2/30/2026")
     with pytest.raises(ValueError):
-        parse_activity_date_parts("10", "14", "26")
+        parse_activity_date("010/14/2026")
+
+
+def test_activity_day_changes_at_four_am_chicago_time() -> None:
+    chicago = ZoneInfo("America/Chicago")
+    assert default_activity_date(datetime(2026, 10, 15, 3, 59, tzinfo=chicago)) == date(
+        2026, 10, 14
+    )
+    assert default_activity_date(datetime(2026, 10, 15, 4, 0, tzinfo=chicago)) == date(2026, 10, 15)
 
 
 def test_rating_options_are_strict_half_steps() -> None:
@@ -84,7 +98,11 @@ def test_movie_title_and_reviewer_snapshot_render_in_post() -> None:
         media_item=item,
     )
 
-    embed = log_embed(cast(discord.User, FakeUser()), media_log)
+    embed = log_embed(
+        cast(discord.User, FakeUser()),
+        media_log,
+        artwork_url="attachment://poster.jpg",
+    )
 
     assert display_title(item) == "Alien (1979)"
     assert embed.author.name == "Ghoul Friend's log"
@@ -94,6 +112,7 @@ def test_movie_title_and_reviewer_snapshot_render_in_post() -> None:
     assert embed.fields[0].value == "⭐⭐⭐⭐⭐ (5)"
     assert embed.fields[1].name == "Review"
     assert embed.fields[1].value == "Still terrifying."
+    assert embed.image.url == "attachment://poster.jpg"
     assert "log #7" in (embed.footer.text or "")
     assert "Data & artwork from TMDB" in (embed.footer.text or "")
     assert log_content(cast(discord.User, FakeUser()), media_log) == "**Logged by <@42>**"
@@ -113,7 +132,7 @@ def test_modal_layouts_and_command_tree_construct() -> None:
 
     assert len(MovieSearchModal(dependencies).to_components()) == 1
     assert len(ManualMediaModal(draft, dependencies).to_components()) == 2
-    assert len(LogDetailsModal(draft, dependencies).to_components()) == 5
+    assert len(LogDetailsModal(draft, dependencies).to_components()) == 4
 
     bot = GhoulBot(
         Settings(discord_application_id=1, discord_guild_id=2),
@@ -122,10 +141,15 @@ def test_modal_layouts_and_command_tree_construct() -> None:
     )
     commands = bot.tree.get_commands(guild=bot.guild)
     command_names = {command.name for command in commands}
-    assert command_names == {"ping", "status", "about", "log", "edit", "delete", "logs"}
+    assert command_names == {"ping", "status", "about", "log", "edit", "delete", "mylogs"}
+    for command_name in ("ping", "status"):
+        operations_command = next(command for command in commands if command.name == command_name)
+        assert operations_command.default_permissions is not None
+        assert operations_command.default_permissions.manage_guild
     log_command = next(command for command in commands if command.name == "log")
     assert isinstance(log_command, discord.app_commands.Command)
-    assert [parameter.name for parameter in log_command.parameters] == ["media_type"]
+    assert [parameter.name for parameter in log_command.parameters] == ["media_type", "title"]
+    assert all(parameter.required for parameter in log_command.parameters)
     assert {choice.name for choice in log_command.parameters[0].choices} == {
         "Movies",
         "TV Shows",
@@ -136,3 +160,29 @@ def test_modal_layouts_and_command_tree_construct() -> None:
         "Video Games",
         "Other",
     }
+
+
+def test_movie_artwork_gallery_is_limited_to_first_five_posters() -> None:
+    dependencies = LogDependencies(
+        repository=cast(object, None),
+        publisher=ForumPublisher(None, None),
+        tmdb=None,
+    )
+    movie = TmdbMovie(
+        id=348,
+        title="Alien",
+        original_title="Alien",
+        release_date=date(1979, 5, 25),
+        overview="In space no one can hear you scream.",
+        poster_path="/default.jpg",
+        payload={},
+    )
+    view = MovieArtworkView(
+        42,
+        movie,
+        [f"/poster-{index}.jpg" for index in range(7)],
+        dependencies,
+    )
+
+    gallery = next(child for child in view.children if isinstance(child, discord.ui.MediaGallery))
+    assert len(gallery.items) == 5
