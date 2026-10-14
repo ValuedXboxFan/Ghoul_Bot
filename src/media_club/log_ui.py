@@ -157,10 +157,18 @@ class OwnedLayoutView(discord.ui.LayoutView):
 class MovieLogStartView(OwnedView):
     """Let a member choose lookup or manual entry before searching TMDB."""
 
-    def __init__(self, owner_id: int, title: str, dependencies: LogDependencies) -> None:
+    def __init__(
+        self,
+        owner_id: int,
+        title: str,
+        dependencies: LogDependencies,
+        *,
+        publish: bool,
+    ) -> None:
         super().__init__(owner_id)
         self.title = title
         self.dependencies = dependencies
+        self.publish = publish
 
     @discord.ui.button(label="Search TMDB", style=discord.ButtonStyle.primary, emoji="🔎")
     async def search(
@@ -169,7 +177,12 @@ class MovieLogStartView(OwnedView):
         _button: discord.ui.Button[MovieLogStartView],
     ) -> None:
         await interaction.response.defer()
-        await present_movie_results(interaction, self.title, self.dependencies)
+        await present_movie_results(
+            interaction,
+            self.title,
+            self.dependencies,
+            publish=self.publish,
+        )
 
     @discord.ui.button(label="Enter manually", style=discord.ButtonStyle.secondary, emoji="✏️")
     async def manual(
@@ -179,7 +192,11 @@ class MovieLogStartView(OwnedView):
     ) -> None:
         await open_modal_and_dismiss_prompt(
             interaction,
-            ManualMediaModal(MediaDraft(kind="movie", title=self.title), self.dependencies),
+            ManualMediaModal(
+                MediaDraft(kind="movie", title=self.title),
+                self.dependencies,
+                publish=self.publish,
+            ),
         )
 
 
@@ -192,17 +209,20 @@ class MovieLookupView(OwnedView):
         query: str,
         movies: list[TmdbMovie],
         dependencies: LogDependencies,
+        *,
+        publish: bool,
     ) -> None:
         super().__init__(owner_id)
-        self.add_item(MovieLookupSelect(query, movies, dependencies))
+        self.add_item(MovieLookupSelect(query, movies, dependencies, publish=publish))
 
 
 class MovieSearchModal(discord.ui.Modal):
     """Collect a movie query before presenting TMDB results."""
 
-    def __init__(self, dependencies: LogDependencies) -> None:
+    def __init__(self, dependencies: LogDependencies, *, publish: bool = False) -> None:
         super().__init__(title="Find a movie", timeout=600)
         self.dependencies = dependencies
+        self.publish = publish
         self.query_input: discord.ui.TextInput[MovieSearchModal] = discord.ui.TextInput(
             placeholder="Movie title",
             min_length=1,
@@ -213,13 +233,20 @@ class MovieSearchModal(discord.ui.Modal):
     async def on_submit(self, interaction: discord.Interaction) -> None:
         query = str(self.query_input).strip()
         await interaction.response.defer(ephemeral=True, thinking=True)
-        await present_movie_results(interaction, query, self.dependencies)
+        await present_movie_results(
+            interaction,
+            query,
+            self.dependencies,
+            publish=self.publish,
+        )
 
 
 async def present_movie_results(
     interaction: discord.Interaction,
     query: str,
     dependencies: LogDependencies,
+    *,
+    publish: bool,
 ) -> None:
     """Search TMDB and display results after an interaction has been deferred."""
     if dependencies.tmdb is None:
@@ -229,6 +256,7 @@ async def present_movie_results(
                 interaction.user.id,
                 MediaDraft(kind="movie", title=query),
                 dependencies,
+                publish=publish,
             ),
         )
         return
@@ -244,6 +272,7 @@ async def present_movie_results(
                 interaction.user.id,
                 MediaDraft(kind="movie", title=query),
                 dependencies,
+                publish=publish,
             ),
         )
         return
@@ -254,6 +283,7 @@ async def present_movie_results(
             query,
             movies,
             dependencies,
+            publish=publish,
         ),
     )
 
@@ -266,10 +296,13 @@ class ManualStartView(OwnedView):
         owner_id: int,
         draft: MediaDraft,
         dependencies: LogDependencies,
+        *,
+        publish: bool,
     ) -> None:
         super().__init__(owner_id)
         self.draft = draft
         self.dependencies = dependencies
+        self.publish = publish
 
     @discord.ui.button(label="Enter manually", style=discord.ButtonStyle.primary)
     async def enter_manually(
@@ -279,7 +312,7 @@ class ManualStartView(OwnedView):
     ) -> None:
         await open_modal_and_dismiss_prompt(
             interaction,
-            ManualMediaModal(self.draft, self.dependencies),
+            ManualMediaModal(self.draft, self.dependencies, publish=self.publish),
         )
 
 
@@ -291,10 +324,13 @@ class MovieLookupSelect(discord.ui.Select[MovieLookupView]):
         query: str,
         movies: list[TmdbMovie],
         dependencies: LogDependencies,
+        *,
+        publish: bool,
     ) -> None:
         self.query = query
         self.movies = {str(movie.id): movie for movie in movies}
         self.dependencies = dependencies
+        self.publish = publish
         options = [
             discord.SelectOption(
                 label=movie.display_title[:100],
@@ -324,6 +360,7 @@ class MovieLookupSelect(discord.ui.Select[MovieLookupView]):
             movie,
             poster_paths,
             self.dependencies,
+            publish=self.publish,
         )
         await interaction.edit_original_response(
             content=None,
@@ -376,12 +413,15 @@ class MovieArtworkView(OwnedLayoutView):
         movie: TmdbMovie,
         poster_paths: list[str],
         dependencies: LogDependencies,
+        *,
+        publish: bool,
     ) -> None:
         super().__init__(owner_id)
         self.movie = movie
         self.poster_paths = poster_paths[:5]
         self.selected_index: int | None = 0 if self.poster_paths else None
         self.dependencies = dependencies
+        self.publish = publish
         self.instructions: discord.ui.TextDisplay[MovieArtworkView] = discord.ui.TextDisplay("")
         self.update_instructions()
         self.add_item(self.instructions)
@@ -419,17 +459,19 @@ class MovieArtworkView(OwnedLayoutView):
         poster_path = (
             self.poster_paths[self.selected_index] if self.selected_index is not None else None
         )
-        await open_modal_and_dismiss_prompt(
-            interaction,
-            LogDetailsModal(
-                MediaDraft(
-                    kind="movie",
-                    title=self.movie.title,
-                    tmdb_movie=self.movie,
-                    selected_poster_path=poster_path,
-                ),
+        draft = MediaDraft(
+            kind="movie",
+            title=self.movie.title,
+            tmdb_movie=self.movie,
+            selected_poster_path=poster_path,
+        )
+        await interaction.response.edit_message(
+            view=MediaReadyView(
+                interaction.user.id,
+                draft,
                 self.dependencies,
-            ),
+                publish=self.publish,
+            )
         )
 
 
@@ -441,11 +483,13 @@ class ManualMediaModal(discord.ui.Modal):
         draft: MediaDraft,
         dependencies: LogDependencies,
         *,
+        publish: bool = False,
         replacement_log_id: int | None = None,
     ) -> None:
         super().__init__(title=f"{MEDIA_TYPES[draft.kind].label} details"[:45], timeout=600)
         self.draft = draft
         self.dependencies = dependencies
+        self.publish = publish
         self.replacement_log_id = replacement_log_id
         self.title_input: discord.ui.TextInput[ManualMediaModal] = discord.ui.TextInput(
             default=draft.title[:100],
@@ -478,6 +522,7 @@ class ManualMediaModal(discord.ui.Modal):
                     self.draft,
                     self.dependencies,
                     self.replacement_log_id,
+                    publish=self.publish,
                 ),
                 ephemeral=True,
             )
@@ -485,8 +530,12 @@ class ManualMediaModal(discord.ui.Modal):
 
         if self.replacement_log_id is None:
             await interaction.response.send_message(
-                f"Media details ready for **{self.draft.title}**.",
-                view=ContinueLogView(interaction.user.id, self.draft, self.dependencies),
+                view=MediaReadyView(
+                    interaction.user.id,
+                    self.draft,
+                    self.dependencies,
+                    publish=self.publish,
+                ),
                 ephemeral=True,
             )
             return
@@ -523,11 +572,14 @@ class ManualRetryView(OwnedView):
         draft: MediaDraft,
         dependencies: LogDependencies,
         replacement_log_id: int | None,
+        *,
+        publish: bool,
     ) -> None:
         super().__init__(owner_id)
         self.draft = draft
         self.dependencies = dependencies
         self.replacement_log_id = replacement_log_id
+        self.publish = publish
 
     @discord.ui.button(label="Try again", style=discord.ButtonStyle.primary)
     async def retry(
@@ -540,48 +592,88 @@ class ManualRetryView(OwnedView):
             ManualMediaModal(
                 self.draft,
                 self.dependencies,
+                publish=self.publish,
                 replacement_log_id=self.replacement_log_id,
             ),
         )
 
 
-class ContinueLogView(OwnedView):
+class AddLogDetailsButton(discord.ui.Button["MediaReadyView"]):
+    def __init__(self) -> None:
+        super().__init__(label="Add log details", style=discord.ButtonStyle.primary)
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        if self.view is not None:
+            await self.view.add_log_details(interaction)
+
+
+class CancelLogButton(discord.ui.Button["MediaReadyView"]):
+    def __init__(self) -> None:
+        super().__init__(label="Cancel", style=discord.ButtonStyle.danger)
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        if self.view is not None:
+            await self.view.cancel(interaction)
+
+
+class MediaReadyView(OwnedLayoutView):
+    """Make the boundary between shared media and member log data explicit."""
+
     def __init__(
         self,
         owner_id: int,
         draft: MediaDraft,
         dependencies: LogDependencies,
+        *,
+        publish: bool,
     ) -> None:
         super().__init__(owner_id)
         self.draft = draft
         self.dependencies = dependencies
+        self.publish = publish
+        media_title = draft.tmdb_movie.display_title if draft.tmdb_movie else draft.title
+        destination = (
+            "This will save it to your ledger and create a forum post."
+            if publish
+            else "This will save it to your private ledger."
+        )
+        self.add_item(
+            discord.ui.TextDisplay(
+                "## Media setup complete\n"
+                f"**{media_title}** is ready. Next, add your log details. {destination}"
+            )
+        )
+        self.add_item(discord.ui.ActionRow(AddLogDetailsButton(), CancelLogButton()))
 
-    @discord.ui.button(label="Add your log details", style=discord.ButtonStyle.primary)
-    async def continue_log(
-        self,
-        interaction: discord.Interaction,
-        _button: discord.ui.Button[ContinueLogView],
-    ) -> None:
+    async def add_log_details(self, interaction: discord.Interaction) -> None:
         await open_modal_and_dismiss_prompt(
             interaction,
-            LogDetailsModal(self.draft, self.dependencies),
+            LogDetailsModal(self.draft, self.dependencies, publish=self.publish),
         )
+
+    async def cancel(self, interaction: discord.Interaction) -> None:
+        prompt = interaction.message
+        await interaction.response.defer()
+        if prompt is not None:
+            with suppress(discord.HTTPException):
+                await prompt.delete()
 
 
 class LogDetailsModal(discord.ui.Modal):
-    """Collect member log data and whether to create a forum post."""
+    """Collect member-specific data after the media item has been prepared."""
 
     def __init__(
         self,
         draft: MediaDraft,
         dependencies: LogDependencies,
         *,
+        publish: bool,
         initial: LogData | None = None,
-        publish: bool = True,
     ) -> None:
         super().__init__(title="Your log", timeout=600)
         self.draft = draft
         self.dependencies = dependencies
+        self.publish = publish
         self.review_input: discord.ui.TextInput[LogDetailsModal] = discord.ui.TextInput(
             style=discord.TextStyle.paragraph,
             default=initial.review if initial and initial.review else None,
@@ -602,16 +694,6 @@ class LogDetailsModal(discord.ui.Modal):
             placeholder="Month/Day/Year",
             required=False,
             max_length=10,
-        )
-        self.publish_input: discord.ui.Select[LogDetailsModal] = discord.ui.Select(
-            placeholder="Create a forum post?",
-            options=[
-                discord.SelectOption(label="Yes", value="yes", default=publish),
-                discord.SelectOption(label="No", value="no", default=not publish),
-            ],
-            min_values=1,
-            max_values=1,
-            required=True,
         )
         self.add_item(
             discord.ui.Label(
@@ -634,13 +716,6 @@ class LogDetailsModal(discord.ui.Modal):
                 component=self.date_input,
             )
         )
-        self.add_item(
-            discord.ui.Label(
-                text="Create forum post?",
-                description="Choose No to save only in your log history",
-                component=self.publish_input,
-            )
-        )
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         try:
@@ -661,7 +736,7 @@ class LogDetailsModal(discord.ui.Modal):
                         rating=selected_rating(self.rating_input),
                         activity_date=None,
                     ),
-                    self.publish_input.values[0] == "yes",
+                    self.publish,
                 ),
                 ephemeral=True,
             )
@@ -673,7 +748,7 @@ class LogDetailsModal(discord.ui.Modal):
             self.draft,
             log_data,
             self.dependencies,
-            publish=self.publish_input.values[0] == "yes",
+            publish=self.publish,
         )
 
 

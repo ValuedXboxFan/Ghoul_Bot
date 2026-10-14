@@ -15,6 +15,7 @@ from media_club.log_ui import (
     LogDependencies,
     LogDetailsModal,
     ManualMediaModal,
+    MediaReadyView,
     MovieArtworkView,
     MovieSearchModal,
     default_activity_date,
@@ -157,7 +158,27 @@ def test_modal_layouts_and_command_tree_construct() -> None:
 
     assert len(MovieSearchModal(dependencies).to_components()) == 1
     assert len(ManualMediaModal(draft, dependencies).to_components()) == 2
-    assert len(LogDetailsModal(draft, dependencies).to_components()) == 4
+    assert len(LogDetailsModal(draft, dependencies, publish=False).to_components()) == 3
+
+    ready_view = MediaReadyView(42, draft, dependencies, publish=False)
+    ready_text = next(
+        item for item in ready_view.children if isinstance(item, discord.ui.TextDisplay)
+    )
+    ready_buttons = [
+        component
+        for item in ready_view.children
+        if isinstance(item, discord.ui.ActionRow)
+        for component in item.children
+    ]
+    assert "private ledger" in ready_text.content
+    assert [button.label for button in ready_buttons] == ["Add log details", "Cancel"]
+    assert ready_buttons[1].style is discord.ButtonStyle.danger
+
+    post_ready_view = MediaReadyView(42, draft, dependencies, publish=True)
+    post_ready_text = next(
+        item for item in post_ready_view.children if isinstance(item, discord.ui.TextDisplay)
+    )
+    assert "create a forum post" in post_ready_text.content
 
     bot = GhoulBot(
         Settings(discord_application_id=1, discord_guild_id=2),
@@ -166,7 +187,16 @@ def test_modal_layouts_and_command_tree_construct() -> None:
     )
     commands = bot.tree.get_commands(guild=bot.guild)
     command_names = {command.name for command in commands}
-    assert command_names == {"ping", "status", "about", "log", "edit", "delete", "mylogs"}
+    assert command_names == {
+        "ping",
+        "status",
+        "about",
+        "log",
+        "post",
+        "edit",
+        "delete",
+        "mylogs",
+    }
     for command_name in ("ping", "status"):
         operations_command = next(command for command in commands if command.name == command_name)
         assert operations_command.default_permissions is not None
@@ -185,6 +215,10 @@ def test_modal_layouts_and_command_tree_construct() -> None:
         "Video Games",
         "Other",
     }
+    post_command = next(command for command in commands if command.name == "post")
+    assert isinstance(post_command, discord.app_commands.Command)
+    assert [parameter.name for parameter in post_command.parameters] == ["media_type", "title"]
+    assert all(parameter.required for parameter in post_command.parameters)
 
 
 def test_movie_artwork_gallery_is_limited_to_first_five_posters() -> None:
@@ -207,6 +241,7 @@ def test_movie_artwork_gallery_is_limited_to_first_five_posters() -> None:
         movie,
         [f"/poster-{index}.jpg" for index in range(7)],
         dependencies,
+        publish=True,
     )
 
     gallery = next(child for child in view.children if isinstance(child, discord.ui.MediaGallery))

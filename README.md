@@ -76,16 +76,20 @@ immediately without waiting for global command propagation:
 - `/ping` confirms the Gateway connection and displays latency; it requires **Manage Server**.
 - `/status` reports the active environment and PostgreSQL connectivity; it requires
   **Manage Server**.
-- `/log` requires an inline media type and title. Movies then offer **Search TMDB** or
-  **Enter manually**; the supplied title is searched directly or pre-populated for manual
-  entry. A matched movie shows its first five available TMDB posters together for selection.
-  Other types open manual entry with the supplied title already filled in.
+- `/log` adds media to the member's private ledger. `/post` follows the same workflow, adds
+  the same ledger entry, and also creates a forum thread. Both require an inline media type
+  and title.
+- Movies offer **Search TMDB** or **Enter manually**; the supplied title is searched directly
+  or pre-populated for manual entry. A matched movie shows its first five available TMDB
+  posters together for selection. Other types open manual entry with the supplied title.
+- After either lookup or manual entry, a **Media setup complete** checkpoint explicitly
+  separates the shared title/artwork from the member's review, rating, and date. The member
+  can add those log details or cancel the unfinished entry.
 - Completed action prompts are replaced as the logging flow advances. A prompt that opens a
-  modal is dismissed immediately, so closing that modal requires restarting `/log`.
-- Every log can include an optional review, strict 1–5 half-step rating, and optional
-  `Month/Day/Year` activity date. New logs default to the current Chicago activity day,
-  which changes at 4 AM. The same form defaults to creating a forum post but can save only
-  a private history record instead.
+  modal is dismissed immediately, so closing that modal requires restarting `/log` or `/post`.
+- Every ledger entry can include an optional review, strict 1–5 half-step rating, and optional
+  `Month/Day/Year` activity date. New entries default to the current Chicago activity day,
+  which changes at 4 AM.
 - `/edit` and `/delete` operate only inside a registered forum post and only for its
   registered owner.
 - `/mylogs` privately browses and edits both forum-posted and private history, newest first,
