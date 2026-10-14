@@ -78,7 +78,7 @@ immediately without waiting for global command propagation:
   **Manage Server**.
 - `/log` requires an inline media type and title. Movies then offer **Search TMDB** or
   **Enter manually**; the supplied title is searched directly or pre-populated for manual
-  entry. A matched movie includes a preview picker for its available TMDB poster artwork.
+  entry. A matched movie shows its first five available TMDB posters together for selection.
   Other types open manual entry with the supplied title already filled in.
 - Every log can include an optional review, strict 1–5 half-step rating, and optional
   `Month/Day/Year` activity date. New logs default to the current Chicago activity day,
@@ -97,6 +97,19 @@ tags exactly as written: `Movies`, `TV Shows`, `Books`, `Comics`, `Podcasts`, `M
 embed links, and manage threads in that forum.
 
 Database migrations run automatically before the web service starts.
+
+## Media data model
+
+Provider-backed media is normalized separately from member activity:
+
+- `media_items` stores one shared item for each `(provider, provider_id)` pair, including the
+  canonical title and TMDB ID.
+- `media_logs` stores each member's individual date, rating, review, selected poster, and forum
+  post identifiers, referencing the shared item through `media_item_id`.
+
+This lets multiple members log the same TMDB movie without duplicating its identity, while
+preserving independent watches and presentation choices. The indexed relationship supports
+future queries for everyone who watched a particular movie and links back to their forum posts.
 
 Movie and television metadata is supplied by TMDB. This product uses the TMDB API
 but is not endorsed or certified by TMDB.
