@@ -12,6 +12,7 @@ from media_club.log_ui import (
     LogDependencies,
     LogDetailsModal,
     ManualMediaModal,
+    MovieArtworkView,
     MovieSearchModal,
     default_activity_date,
     parse_activity_date,
@@ -26,6 +27,7 @@ from media_club.logging_workflow import (
     rating_stars,
 )
 from media_club.models import MediaItem, MediaLog
+from media_club.tmdb import TmdbMovie
 
 
 class FakeAvatar:
@@ -149,3 +151,29 @@ def test_modal_layouts_and_command_tree_construct() -> None:
         "Video Games",
         "Other",
     }
+
+
+def test_movie_artwork_gallery_is_limited_to_first_five_posters() -> None:
+    dependencies = LogDependencies(
+        repository=cast(object, None),
+        publisher=ForumPublisher(None, None),
+        tmdb=None,
+    )
+    movie = TmdbMovie(
+        id=348,
+        title="Alien",
+        original_title="Alien",
+        release_date=date(1979, 5, 25),
+        overview="In space no one can hear you scream.",
+        poster_path="/default.jpg",
+        payload={},
+    )
+    view = MovieArtworkView(
+        42,
+        movie,
+        [f"/poster-{index}.jpg" for index in range(7)],
+        dependencies,
+    )
+
+    gallery = next(child for child in view.children if isinstance(child, discord.ui.MediaGallery))
+    assert len(gallery.items) == 5

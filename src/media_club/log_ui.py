@@ -125,6 +125,22 @@ class OwnedView(discord.ui.View):
         return False
 
 
+class OwnedLayoutView(discord.ui.LayoutView):
+    """Base Components V2 layout restricted to the member who started it."""
+
+    def __init__(self, owner_id: int, *, timeout: float = 300) -> None:
+        super().__init__(timeout=timeout)
+        self.owner_id = owner_id
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.owner_id:
+            return True
+        await interaction.response.send_message(
+            "This control belongs to another member.", ephemeral=True
+        )
+        return False
+
+
 class MovieLogStartView(OwnedView):
     """Let a member choose lookup or manual entry before searching TMDB."""
 
@@ -296,8 +312,8 @@ class MovieLookupSelect(discord.ui.Select[MovieLookupView]):
             self.dependencies,
         )
         await interaction.edit_original_response(
-            content="Choose the artwork for this post, then continue:",
-            embed=view.preview_embed(),
+            content=None,
+            embed=None,
             view=view,
         )
 
@@ -323,11 +339,22 @@ class MovieArtworkSelect(discord.ui.Select["MovieArtworkView"]):
         self.view.selected_index = None if self.values[0] == "none" else int(self.values[0])
         for option in self.options:
             option.default = option.value == self.values[0]
-        await interaction.response.edit_message(embed=self.view.preview_embed(), view=self.view)
+        self.view.update_instructions()
+        await interaction.response.edit_message(view=self.view)
 
 
-class MovieArtworkView(OwnedView):
-    """Preview and select one of TMDB's available movie posters."""
+class MovieArtworkContinueButton(discord.ui.Button["MovieArtworkView"]):
+    def __init__(self) -> None:
+        super().__init__(label="Continue", style=discord.ButtonStyle.primary)
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        if self.view is None:
+            return
+        await self.view.continue_log(interaction)
+
+
+class MovieArtworkView(OwnedLayoutView):
+    """Show five TMDB posters together and retain the member's selection."""
 
     def __init__(
         self,
@@ -338,28 +365,42 @@ class MovieArtworkView(OwnedView):
     ) -> None:
         super().__init__(owner_id)
         self.movie = movie
-        self.poster_paths = poster_paths[:10]
+        self.poster_paths = poster_paths[:5]
         self.selected_index: int | None = 0 if self.poster_paths else None
         self.dependencies = dependencies
-        self.add_item(MovieArtworkSelect(self.poster_paths))
+        self.instructions: discord.ui.TextDisplay[MovieArtworkView] = discord.ui.TextDisplay("")
+        self.update_instructions()
+        self.add_item(self.instructions)
+        if self.poster_paths:
+            self.add_item(
+                discord.ui.MediaGallery(
+                    *[
+                        discord.MediaGalleryItem(
+                            f"{TMDB_IMAGE_URL}{path}",
+                            description=f"Poster {index + 1} for {movie.display_title}",
+                        )
+                        for index, path in enumerate(self.poster_paths)
+                    ]
+                )
+            )
+        self.add_item(discord.ui.ActionRow(MovieArtworkSelect(self.poster_paths)))
+        self.add_item(discord.ui.ActionRow(MovieArtworkContinueButton()))
 
-    def preview_embed(self) -> discord.Embed:
-        embed = discord.Embed(
-            title=self.movie.display_title,
-            description=self.movie.overview[:500] or None,
-            color=discord.Color.dark_teal(),
+    def update_instructions(self) -> None:
+        selected = (
+            f"Poster {self.selected_index + 1} selected."
+            if self.selected_index is not None
+            else "No artwork selected."
         )
-        if self.selected_index is not None:
-            embed.set_image(url=f"{TMDB_IMAGE_URL}{self.poster_paths[self.selected_index]}")
-        else:
-            embed.set_footer(text="No artwork selected")
-        return embed
+        self.instructions.content = (
+            f"## {self.movie.display_title}\n"
+            "Choose from the first five available posters, numbered left-to-right and "
+            f"top-to-bottom. **{selected}**"
+        )
 
-    @discord.ui.button(label="Continue", style=discord.ButtonStyle.primary)
     async def continue_log(
         self,
         interaction: discord.Interaction,
-        _button: discord.ui.Button[MovieArtworkView],
     ) -> None:
         poster_path = (
             self.poster_paths[self.selected_index] if self.selected_index is not None else None
