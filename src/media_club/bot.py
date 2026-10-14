@@ -7,6 +7,7 @@ from discord import app_commands
 from media_club.config import Settings
 from media_club.database import Database
 from media_club.log_ui import (
+    LOGS_PAGE_SIZE,
     DeleteConfirmationView,
     EditChoiceView,
     LogDependencies,
@@ -191,22 +192,25 @@ class GhoulBot(discord.Client):
                 ephemeral=True,
             )
 
-        @self.tree.command(name="logs", description="Manage logs without forum posts")
+        @self.tree.command(name="mylogs", description="Browse and edit your media logs")
         @app_commands.guilds(self.guild)
-        async def logs(interaction: discord.Interaction) -> None:
+        async def mylogs(interaction: discord.Interaction) -> None:
             await interaction.response.defer(ephemeral=True, thinking=True)
-            media_logs = await self.media_repository.list_unposted_logs(interaction.user.id)
+            results = await self.media_repository.list_owned_logs(
+                interaction.user.id,
+                limit=LOGS_PAGE_SIZE + 1,
+            )
+            media_logs = results[:LOGS_PAGE_SIZE]
             if not media_logs:
-                await interaction.followup.send(
-                    "You don't have any private logs without forum posts.", ephemeral=True
-                )
+                await interaction.followup.send("You haven't logged any media yet.", ephemeral=True)
                 return
             await interaction.followup.send(
-                "Choose one of your private logs:",
+                "Choose one of your logs — page 1:",
                 view=LogsView(
                     interaction.user.id,
                     media_logs,
                     self.log_dependencies,
+                    has_next=len(results) > LOGS_PAGE_SIZE,
                 ),
                 ephemeral=True,
             )

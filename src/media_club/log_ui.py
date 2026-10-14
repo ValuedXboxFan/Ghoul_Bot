@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 
 RATINGS = tuple(Decimal(value) / 2 for value in range(2, 11))
 ACTIVITY_TIMEZONE = ZoneInfo("America/Chicago")
+LOGS_PAGE_SIZE = 25
 
 
 @dataclass(frozen=True, slots=True)
@@ -1009,19 +1010,26 @@ class DeleteConfirmationView(OwnedView):
 
 
 class LogsView(OwnedView):
-    """Manage private logs that do not have a forum post."""
+    """Browse and manage a paginated history of all member-owned logs."""
 
     def __init__(
         self,
         owner_id: int,
         logs: list[MediaLog],
         dependencies: LogDependencies,
+        *,
+        page: int = 0,
+        has_next: bool = False,
     ) -> None:
         super().__init__(owner_id)
         self.logs = {media_log.id: media_log for media_log in logs}
         self.dependencies = dependencies
+        self.page = page
+        self.has_next = has_next
         self.selected_log_id: int | None = None
-        self.add_item(PrivateLogSelect(logs))
+        self.add_item(OwnedLogSelect(logs))
+        self.previous_page.disabled = page == 0
+        self.next_page.disabled = not has_next
 
     def selected(self) -> MediaLog | None:
         if self.selected_log_id is None:
@@ -1051,7 +1059,7 @@ class LogsView(OwnedView):
             await interaction.response.send_message("Choose a log first.", ephemeral=True)
             return
         await interaction.response.send_message(
-            "This replaces the title and optional artwork for the selected private log.",
+            "This replaces the title and optional artwork for the selected log.",
             view=MediaEditWarningView(
                 interaction.user.id,
                 media_log,
@@ -1080,20 +1088,69 @@ class LogsView(OwnedView):
             ephemeral=True,
         )
 
+    async def show_page(self, interaction: discord.Interaction, page: int) -> None:
+        results = await self.dependencies.repository.list_owned_logs(
+            self.owner_id,
+            offset=page * LOGS_PAGE_SIZE,
+            limit=LOGS_PAGE_SIZE + 1,
+        )
+        page_logs = results[:LOGS_PAGE_SIZE]
+        if not page_logs:
+            await interaction.response.send_message(
+                "There are no logs on that page.", ephemeral=True
+            )
+            return
 
-class PrivateLogSelect(discord.ui.Select[LogsView]):
+        current_select = next(
+            (item for item in self.children if isinstance(item, OwnedLogSelect)),
+            None,
+        )
+        if current_select is not None:
+            self.remove_item(current_select)
+        self.logs = {media_log.id: media_log for media_log in page_logs}
+        self.page = page
+        self.has_next = len(results) > LOGS_PAGE_SIZE
+        self.selected_log_id = None
+        self.previous_page.disabled = page == 0
+        self.next_page.disabled = not self.has_next
+        self.add_item(OwnedLogSelect(page_logs))
+        await interaction.response.edit_message(
+            content=f"Choose one of your logs — page {page + 1}:",
+            view=self,
+        )
+
+    @discord.ui.button(label="Previous", style=discord.ButtonStyle.secondary, row=2)
+    async def previous_page(
+        self,
+        interaction: discord.Interaction,
+        _button: discord.ui.Button[LogsView],
+    ) -> None:
+        await self.show_page(interaction, max(0, self.page - 1))
+
+    @discord.ui.button(label="Next", style=discord.ButtonStyle.secondary, row=2)
+    async def next_page(
+        self,
+        interaction: discord.Interaction,
+        _button: discord.ui.Button[LogsView],
+    ) -> None:
+        await self.show_page(interaction, self.page + 1)
+
+
+class OwnedLogSelect(discord.ui.Select[LogsView]):
     def __init__(self, logs: list[MediaLog]) -> None:
         options = [
             discord.SelectOption(
                 label=media_log.media_item.title[:100],
                 value=str(media_log.id),
                 description=(
-                    f"{MEDIA_TYPES[media_log.media_item.media_type].label} • Log #{media_log.id}"
+                    f"{MEDIA_TYPES[media_log.media_item.media_type].label} • "
+                    f"{'Forum post' if media_log.forum_thread_id else 'Private'} • "
+                    f"Log #{media_log.id}"
                 )[:100],
             )
             for media_log in logs
         ]
-        super().__init__(placeholder="Choose a private log", options=options)
+        super().__init__(placeholder="Choose one of your logs", options=options)
 
     async def callback(self, interaction: discord.Interaction) -> None:
         if self.view is None:
@@ -1102,7 +1159,8 @@ class PrivateLogSelect(discord.ui.Select[LogsView]):
         media_log = self.view.selected()
         if media_log is None:
             return
+        post_link = f" • <#{media_log.forum_thread_id}>" if media_log.forum_thread_id else ""
         await interaction.response.edit_message(
-            content=f"Selected **{media_log.media_item.title}** (`#{media_log.id}`).",
+            content=f"Selected **{media_log.media_item.title}** (`#{media_log.id}`){post_link}.",
             view=self.view,
         )

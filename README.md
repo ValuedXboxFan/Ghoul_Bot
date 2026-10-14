@@ -85,7 +85,8 @@ immediately without waiting for global command propagation:
   a private history record instead.
 - `/edit` and `/delete` operate only inside a registered forum post and only for its
   registered owner.
-- `/logs` privately manages history records that do not have a forum post.
+- `/mylogs` privately browses and edits both forum-posted and private history, newest first,
+  with pagination beyond 25 entries.
 - `/about` shows Ghoul Bot's credits and data-source attribution.
 
 Set `DISCORD_MEDIA_FORUM_CHANNEL_ID` to the target forum channel ID. The legacy

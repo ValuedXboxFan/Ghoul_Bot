@@ -141,7 +141,7 @@ def test_modal_layouts_and_command_tree_construct() -> None:
     )
     commands = bot.tree.get_commands(guild=bot.guild)
     command_names = {command.name for command in commands}
-    assert command_names == {"ping", "status", "about", "log", "edit", "delete", "logs"}
+    assert command_names == {"ping", "status", "about", "log", "edit", "delete", "mylogs"}
     log_command = next(command for command in commands if command.name == "log")
     assert isinstance(log_command, discord.app_commands.Command)
     assert [parameter.name for parameter in log_command.parameters] == ["media_type", "title"]

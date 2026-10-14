@@ -146,17 +146,21 @@ class MediaRepository:
                 ),
             )
 
-    async def list_unposted_logs(self, discord_user_id: int, *, limit: int = 25) -> list[MediaLog]:
-        """Return recent private log records that do not have a forum post."""
+    async def list_owned_logs(
+        self,
+        discord_user_id: int,
+        *,
+        offset: int = 0,
+        limit: int = 25,
+    ) -> list[MediaLog]:
+        """Return a newest-first page of all logs owned by a member."""
         async with self.database.sessions() as session:
             result = await session.scalars(
                 select(MediaLog)
                 .options(joinedload(MediaLog.media_item))
-                .where(
-                    MediaLog.discord_user_id == discord_user_id,
-                    MediaLog.forum_thread_id.is_(None),
-                )
+                .where(MediaLog.discord_user_id == discord_user_id)
                 .order_by(MediaLog.created_at.desc())
+                .offset(offset)
                 .limit(limit)
             )
             return list(result.unique())
