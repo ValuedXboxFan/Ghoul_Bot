@@ -104,22 +104,12 @@ class GhoulBot(discord.Client):
         ping.error(operations_permission_error)
         status.error(operations_permission_error)
 
-        @self.tree.command(name="log", description="Log media you've experienced")
-        @app_commands.guilds(self.guild)
-        @app_commands.describe(
-            media_type="What kind of media are you logging?",
-            title="Title or search text",
-        )
-        @app_commands.choices(
-            media_type=[
-                app_commands.Choice(name=definition.tag_name, value=key)
-                for key, definition in MEDIA_TYPES.items()
-            ]
-        )
-        async def log(
+        async def start_log_workflow(
             interaction: discord.Interaction,
             media_type: app_commands.Choice[str],
             title: app_commands.Range[str, 1, 100],
+            *,
+            publish: bool,
         ) -> None:
             clean_title = title.strip()
             media_kind = cast(MediaKind, media_type.value)
@@ -130,6 +120,7 @@ class GhoulBot(discord.Client):
                         interaction.user.id,
                         clean_title,
                         self.log_dependencies,
+                        publish=publish,
                     ),
                     ephemeral=True,
                 )
@@ -138,8 +129,42 @@ class GhoulBot(discord.Client):
                 ManualMediaModal(
                     MediaDraft(kind=media_kind, title=clean_title),
                     self.log_dependencies,
+                    publish=publish,
                 )
             )
+
+        media_type_choices = [
+            app_commands.Choice(name=definition.tag_name, value=key)
+            for key, definition in MEDIA_TYPES.items()
+        ]
+
+        @self.tree.command(name="log", description="Add media to your private ledger")
+        @app_commands.guilds(self.guild)
+        @app_commands.describe(
+            media_type="What kind of media are you logging?",
+            title="Title or search text",
+        )
+        @app_commands.choices(media_type=media_type_choices)
+        async def log(
+            interaction: discord.Interaction,
+            media_type: app_commands.Choice[str],
+            title: app_commands.Range[str, 1, 100],
+        ) -> None:
+            await start_log_workflow(interaction, media_type, title, publish=False)
+
+        @self.tree.command(name="post", description="Log media and create a forum post")
+        @app_commands.guilds(self.guild)
+        @app_commands.describe(
+            media_type="What kind of media are you posting?",
+            title="Title or search text",
+        )
+        @app_commands.choices(media_type=media_type_choices)
+        async def post(
+            interaction: discord.Interaction,
+            media_type: app_commands.Choice[str],
+            title: app_commands.Range[str, 1, 100],
+        ) -> None:
+            await start_log_workflow(interaction, media_type, title, publish=True)
 
         @self.tree.command(name="about", description="View Ghoul Bot credits and data sources")
         @app_commands.guilds(self.guild)
