@@ -1,5 +1,10 @@
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
 
 def async_database_url(url: str) -> str:
@@ -21,6 +26,7 @@ class Database:
             async_database_url(url),
             pool_pre_ping=True,
         )
+        self.sessions = async_sessionmaker(self.engine, expire_on_commit=False, class_=AsyncSession)
 
     async def ping(self) -> bool:
         """Check that PostgreSQL accepts a simple query."""

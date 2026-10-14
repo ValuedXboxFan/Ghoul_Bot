@@ -4,6 +4,7 @@ import logging
 from media_club.bot import GhoulBot
 from media_club.config import Settings
 from media_club.database import Database
+from media_club.tmdb import TmdbClient
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +17,7 @@ class ApplicationRuntime:
         self.database: Database | None = None
         self.bot: GhoulBot | None = None
         self.bot_task: asyncio.Task[None] | None = None
+        self.tmdb: TmdbClient | None = None
 
     async def start(self) -> None:
         """Initialize configured dependencies without blocking HTTP startup."""
@@ -24,11 +26,21 @@ class ApplicationRuntime:
         else:
             logger.warning("DATABASE_URL is not configured")
 
+        tmdb_token = self.config.tmdb_read_access_token
+        if tmdb_token is not None:
+            self.tmdb = TmdbClient(
+                tmdb_token.get_secret_value(),
+                language=self.config.tmdb_language,
+                region=self.config.tmdb_region,
+            )
+        else:
+            logger.warning("TMDB_READ_ACCESS_TOKEN is not configured")
+
         if self.config.discord_configured and self.database is not None:
             token = self.config.discord_bot_token
             if token is None:
                 return
-            self.bot = GhoulBot(self.config, self.database)
+            self.bot = GhoulBot(self.config, self.database, self.tmdb)
             self.bot_task = asyncio.create_task(
                 self.bot.start(token.get_secret_value()),
                 name="discord-client",
@@ -55,6 +67,8 @@ class ApplicationRuntime:
             await asyncio.gather(self.bot_task, return_exceptions=True)
         if self.database is not None:
             await self.database.close()
+        if self.tmdb is not None:
+            await self.tmdb.close()
 
     async def readiness(self) -> tuple[bool, dict[str, str]]:
         """Check database connectivity and Discord Gateway readiness."""

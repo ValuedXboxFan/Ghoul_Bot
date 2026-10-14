@@ -75,8 +75,13 @@ immediately without waiting for global command propagation:
 
 - `/ping` confirms the Gateway connection and displays latency.
 - `/status` reports the active environment and PostgreSQL connectivity.
+- `/movie search` searches TMDB, presents an interactive picker, saves the selected
+  movie, and displays its poster and overview.
 
 Database migrations run automatically before the web service starts.
+
+Movie and television metadata is supplied by TMDB. This product uses the TMDB API
+but is not endorsed or certified by TMDB.
 
 ## Railway layout
 
