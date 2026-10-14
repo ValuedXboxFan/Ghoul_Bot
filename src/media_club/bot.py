@@ -1,4 +1,5 @@
 import logging
+from typing import cast
 
 import discord
 from discord import app_commands
@@ -14,7 +15,7 @@ from media_club.log_ui import (
     MovieLogStartView,
 )
 from media_club.logging_workflow import ForumPublisher, MediaDraft
-from media_club.media_types import MediaKind
+from media_club.media_types import MEDIA_TYPES, MediaKind
 from media_club.models import MediaLog
 from media_club.repositories import MediaRepository
 from media_club.tmdb import TmdbClient
@@ -83,56 +84,33 @@ class GhoulBot(discord.Client):
                 ephemeral=True,
             )
 
-        log_group = app_commands.Group(name="log", description="Log media you've experienced")
-
-        @log_group.command(name="movie", description="Log a movie")
-        async def log_movie(interaction: discord.Interaction) -> None:
-            await interaction.response.send_message(
-                "How would you like to add this movie?",
-                view=MovieLogStartView(interaction.user.id, self.log_dependencies),
-                ephemeral=True,
-            )
-
-        async def start_manual_log(
+        @self.tree.command(name="log", description="Log media you've experienced")
+        @app_commands.guilds(self.guild)
+        @app_commands.describe(media_type="What kind of media are you logging?")
+        @app_commands.choices(
+            media_type=[
+                app_commands.Choice(name=definition.tag_name, value=key)
+                for key, definition in MEDIA_TYPES.items()
+            ]
+        )
+        async def log(
             interaction: discord.Interaction,
-            media_kind: MediaKind,
+            media_type: app_commands.Choice[str],
         ) -> None:
+            media_kind = cast(MediaKind, media_type.value)
+            if media_kind == "movie":
+                await interaction.response.send_message(
+                    "How would you like to add this movie?",
+                    view=MovieLogStartView(interaction.user.id, self.log_dependencies),
+                    ephemeral=True,
+                )
+                return
             await interaction.response.send_modal(
                 ManualMediaModal(
                     MediaDraft(kind=media_kind, title=""),
                     self.log_dependencies,
                 )
             )
-
-        @log_group.command(name="tv_show", description="Log a TV show")
-        async def log_tv_show(interaction: discord.Interaction) -> None:
-            await start_manual_log(interaction, "tv_show")
-
-        @log_group.command(name="book", description="Log a book")
-        async def log_book(interaction: discord.Interaction) -> None:
-            await start_manual_log(interaction, "book")
-
-        @log_group.command(name="comic", description="Log a comic")
-        async def log_comic(interaction: discord.Interaction) -> None:
-            await start_manual_log(interaction, "comic")
-
-        @log_group.command(name="podcast", description="Log a podcast")
-        async def log_podcast(interaction: discord.Interaction) -> None:
-            await start_manual_log(interaction, "podcast")
-
-        @log_group.command(name="music", description="Log music")
-        async def log_music(interaction: discord.Interaction) -> None:
-            await start_manual_log(interaction, "music")
-
-        @log_group.command(name="video_game", description="Log a video game")
-        async def log_video_game(interaction: discord.Interaction) -> None:
-            await start_manual_log(interaction, "video_game")
-
-        @log_group.command(name="other", description="Log another kind of media")
-        async def log_other(interaction: discord.Interaction) -> None:
-            await start_manual_log(interaction, "other")
-
-        self.tree.add_command(log_group, guild=self.guild)
 
         @self.tree.command(name="about", description="View Ghoul Bot credits and data sources")
         @app_commands.guilds(self.guild)
