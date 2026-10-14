@@ -95,3 +95,36 @@ def test_download_poster_does_not_send_api_token_to_image_host() -> None:
         assert poster == b"poster-bytes"
 
     asyncio.run(scenario())
+
+
+def test_movie_poster_paths_normalizes_unique_results() -> None:
+    async def scenario() -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            assert request.url.path == "/3/movie/348/images"
+            assert request.url.params["include_image_language"] == "en,null"
+            assert request.headers["Authorization"] == "Bearer secret-token"
+            return httpx.Response(
+                200,
+                json={
+                    "posters": [
+                        {"file_path": "/one.jpg"},
+                        {"file_path": "/one.jpg"},
+                        {"file_path": "/two.jpg"},
+                        {"not_a_path": True},
+                    ]
+                },
+            )
+
+        client = TmdbClient(
+            "secret-token",
+            http_client=httpx.AsyncClient(
+                base_url="https://api.themoviedb.org/3",
+                transport=httpx.MockTransport(handler),
+            ),
+        )
+        posters = await client.movie_poster_paths(348)
+        await client.close()
+
+        assert posters == ["/one.jpg", "/two.jpg"]
+
+    asyncio.run(scenario())

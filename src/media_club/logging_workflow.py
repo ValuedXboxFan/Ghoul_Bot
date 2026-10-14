@@ -13,7 +13,6 @@ from media_club.models import MediaItem, MediaLog
 from media_club.tmdb import TmdbClient, TmdbMovie
 
 MAX_ARTWORK_BYTES = 5 * 1024 * 1024
-TMDB_ATTRIBUTION = "This product uses the TMDB API but is not endorsed or certified by TMDB."
 
 
 @dataclass(slots=True)
@@ -64,23 +63,42 @@ def log_embed(user: discord.User | discord.Member, media_log: MediaLog) -> disco
         name=f"{user.display_name}'s log",
         icon_url=user.display_avatar.url,
     )
-    if media_log.rating is not None:
-        embed.add_field(name="Rating", value=f"{media_log.rating.normalize()}/5")
     if media_log.activity_date is not None:
-        embed.add_field(name="Date", value=media_log.activity_date.isoformat())
+        embed.add_field(
+            name="Date",
+            value=(
+                f"{media_log.activity_date.strftime('%B')} "
+                f"{media_log.activity_date.day}, {media_log.activity_date.year}"
+            ),
+            inline=False,
+        )
+    if media_log.rating is not None:
+        embed.add_field(
+            name="Rating",
+            value=rating_stars(media_log.rating),
+            inline=False,
+        )
+    if media_log.review:
+        embed.add_field(name="Review", value=media_log.review, inline=False)
 
     footer = f"{MEDIA_TYPES[item.media_type].label} log #{media_log.id}"
     if item.provider == "tmdb":
-        footer = f"{footer} • {TMDB_ATTRIBUTION}"
+        footer = f"{footer} • Data & artwork from TMDB"
     embed.set_footer(text=footer)
     return embed
 
 
+def rating_stars(rating: Decimal) -> str:
+    """Render a strict half-step rating as a compact five-star display."""
+    doubled = int(rating * 2)
+    full_stars, has_half = divmod(doubled, 2)
+    empty_stars = 5 - full_stars - has_half
+    return f"{'⭐' * full_stars}{'½' if has_half else ''}{'☆' * empty_stars} ({rating.normalize()})"
+
+
 def log_content(user: discord.User | discord.Member, media_log: MediaLog) -> str:
-    """Render the live user reference and review as the forum-card preview text."""
-    if media_log.review:
-        return f"**Review by {user.mention}**\n\n{media_log.review}"
-    return f"Logged by {user.mention}"
+    """Render the live user reference above the artwork and structured log data."""
+    return f"**Logged by {user.mention}**"
 
 
 class ForumPublisher:
