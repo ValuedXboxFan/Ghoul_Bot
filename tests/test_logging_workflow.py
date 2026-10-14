@@ -98,7 +98,11 @@ def test_movie_title_and_reviewer_snapshot_render_in_post() -> None:
         media_item=item,
     )
 
-    embed = log_embed(cast(discord.User, FakeUser()), media_log)
+    embed = log_embed(
+        cast(discord.User, FakeUser()),
+        media_log,
+        artwork_url="attachment://poster.jpg",
+    )
 
     assert display_title(item) == "Alien (1979)"
     assert embed.author.name == "Ghoul Friend's log"
@@ -108,6 +112,7 @@ def test_movie_title_and_reviewer_snapshot_render_in_post() -> None:
     assert embed.fields[0].value == "⭐⭐⭐⭐⭐ (5)"
     assert embed.fields[1].name == "Review"
     assert embed.fields[1].value == "Still terrifying."
+    assert embed.image.url == "attachment://poster.jpg"
     assert "log #7" in (embed.footer.text or "")
     assert "Data & artwork from TMDB" in (embed.footer.text or "")
     assert log_content(cast(discord.User, FakeUser()), media_log) == "**Logged by <@42>**"

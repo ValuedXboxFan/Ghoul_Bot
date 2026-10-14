@@ -56,8 +56,13 @@ def display_title(item: MediaItem) -> str:
     return item.title[:100]
 
 
-def log_embed(user: discord.User | discord.Member, media_log: MediaLog) -> discord.Embed:
-    """Render member log data with an avatar snapshot and durable log identifier."""
+def log_embed(
+    user: discord.User | discord.Member,
+    media_log: MediaLog,
+    *,
+    artwork_url: str | None = None,
+) -> discord.Embed:
+    """Render log details above optional artwork in one ordered card."""
     item = media_log.media_item
     embed = discord.Embed(color=discord.Color.dark_teal())
     embed.set_author(
@@ -81,6 +86,8 @@ def log_embed(user: discord.User | discord.Member, media_log: MediaLog) -> disco
         )
     if media_log.review:
         embed.add_field(name="Review", value=media_log.review, inline=False)
+    if artwork_url is not None:
+        embed.set_image(url=artwork_url)
 
     footer = f"{MEDIA_TYPES[item.media_type].label} log #{media_log.id}"
     if item.provider == "tmdb":
@@ -128,11 +135,16 @@ class ForumPublisher:
 
         media_log.media_item = item
         artwork = await self.artwork(media_log, item)
+        embed = log_embed(
+            user,
+            media_log,
+            artwork_url=f"attachment://{artwork.filename}" if artwork is not None else None,
+        )
         if artwork is None:
             created = await forum.create_thread(
                 name=display_title(item),
                 content=log_content(user, media_log),
-                embed=log_embed(user, media_log),
+                embed=embed,
                 applied_tags=[tag],
                 allowed_mentions=discord.AllowedMentions.none(),
             )
@@ -140,7 +152,7 @@ class ForumPublisher:
             created = await forum.create_thread(
                 name=display_title(item),
                 content=log_content(user, media_log),
-                embed=log_embed(user, media_log),
+                embed=embed,
                 applied_tags=[tag],
                 allowed_mentions=discord.AllowedMentions.none(),
                 file=discord.File(io.BytesIO(artwork.data), filename=artwork.filename),
@@ -162,9 +174,10 @@ class ForumPublisher:
         if not isinstance(channel, discord.Thread):
             raise ForumConfigurationError("The stored forum thread no longer exists.")
         message = await channel.fetch_message(media_log.forum_message_id)
+        artwork_url = message.attachments[0].url if message.attachments else None
         await message.edit(
             content=log_content(user, media_log),
-            embed=log_embed(user, media_log),
+            embed=log_embed(user, media_log, artwork_url=artwork_url),
             allowed_mentions=discord.AllowedMentions.none(),
         )
 
