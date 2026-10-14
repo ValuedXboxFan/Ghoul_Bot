@@ -73,8 +73,9 @@ Discord connectivity. It returns HTTP 503 until both dependencies are connected.
 The staging bot registers commands directly to `DISCORD_GUILD_ID`, so they appear
 immediately without waiting for global command propagation:
 
-- `/ping` confirms the Gateway connection and displays latency.
-- `/status` reports the active environment and PostgreSQL connectivity.
+- `/ping` confirms the Gateway connection and displays latency; it requires **Manage Server**.
+- `/status` reports the active environment and PostgreSQL connectivity; it requires
+  **Manage Server**.
 - `/log` requires an inline media type and title. Movies then offer **Search TMDB** or
   **Enter manually**; the supplied title is searched directly or pre-populated for manual
   entry. A matched movie includes a preview picker for its available TMDB poster artwork.

@@ -142,6 +142,10 @@ def test_modal_layouts_and_command_tree_construct() -> None:
     commands = bot.tree.get_commands(guild=bot.guild)
     command_names = {command.name for command in commands}
     assert command_names == {"ping", "status", "about", "log", "edit", "delete", "mylogs"}
+    for command_name in ("ping", "status"):
+        operations_command = next(command for command in commands if command.name == command_name)
+        assert operations_command.default_permissions is not None
+        assert operations_command.default_permissions.manage_guild
     log_command = next(command for command in commands if command.name == "log")
     assert isinstance(log_command, discord.app_commands.Command)
     assert [parameter.name for parameter in log_command.parameters] == ["media_type", "title"]

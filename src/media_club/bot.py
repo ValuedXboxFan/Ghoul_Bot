@@ -62,6 +62,8 @@ class GhoulBot(discord.Client):
     def _register_commands(self, config: Settings) -> None:
         @self.tree.command(name="ping", description="Check whether Ghoul Bot is online")
         @app_commands.guilds(self.guild)
+        @app_commands.default_permissions(manage_guild=True)
+        @app_commands.checks.has_permissions(manage_guild=True)
         async def ping(interaction: discord.Interaction) -> None:
             latency_ms = round(self.latency * 1000)
             await interaction.response.send_message(
@@ -71,6 +73,8 @@ class GhoulBot(discord.Client):
 
         @self.tree.command(name="status", description="Check Ghoul Bot's dependencies")
         @app_commands.guilds(self.guild)
+        @app_commands.default_permissions(manage_guild=True)
+        @app_commands.checks.has_permissions(manage_guild=True)
         async def status(interaction: discord.Interaction) -> None:
             database_status = "connected" if await self.database.ping() else "unavailable"
             tmdb_status = "configured" if self.tmdb is not None else "not configured"
@@ -84,6 +88,21 @@ class GhoulBot(discord.Client):
                 f"Media forum: **{media_forum_status}**",
                 ephemeral=True,
             )
+
+        async def operations_permission_error(
+            interaction: discord.Interaction,
+            error: app_commands.AppCommandError,
+        ) -> None:
+            if isinstance(error, app_commands.MissingPermissions):
+                await interaction.response.send_message(
+                    "You need the Manage Server permission to use that command.",
+                    ephemeral=True,
+                )
+                return
+            raise error
+
+        ping.error(operations_permission_error)
+        status.error(operations_permission_error)
 
         @self.tree.command(name="log", description="Log media you've experienced")
         @app_commands.guilds(self.guild)
