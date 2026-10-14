@@ -549,12 +549,8 @@ class LogDetailsModal(discord.ui.Modal):
                 component=self.month_input,
             )
         )
-        self.add_item(
-            discord.ui.Label(text="Day (optional)", component=self.day_input)
-        )
-        self.add_item(
-            discord.ui.Label(text="Year (optional)", component=self.year_input)
-        )
+        self.add_item(discord.ui.Label(text="Day (optional)", component=self.day_input))
+        self.add_item(discord.ui.Label(text="Year (optional)", component=self.year_input))
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         try:
