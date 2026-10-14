@@ -123,15 +123,16 @@ def test_modal_layouts_and_command_tree_construct() -> None:
     commands = bot.tree.get_commands(guild=bot.guild)
     command_names = {command.name for command in commands}
     assert command_names == {"ping", "status", "about", "log", "edit", "delete", "logs"}
-    log_group = next(command for command in commands if command.name == "log")
-    assert isinstance(log_group, discord.app_commands.Group)
-    assert {command.name for command in log_group.commands} == {
-        "movie",
-        "tv_show",
-        "book",
-        "comic",
-        "podcast",
-        "music",
-        "video_game",
-        "other",
+    log_command = next(command for command in commands if command.name == "log")
+    assert isinstance(log_command, discord.app_commands.Command)
+    assert [parameter.name for parameter in log_command.parameters] == ["media_type"]
+    assert {choice.name for choice in log_command.parameters[0].choices} == {
+        "Movies",
+        "TV Shows",
+        "Books",
+        "Comics",
+        "Podcasts",
+        "Music",
+        "Video Games",
+        "Other",
     }
