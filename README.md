@@ -79,7 +79,7 @@ immediately without waiting for global command propagation:
 - `/log` requires an inline media type and title. Movies then offer **Search TMDB** or
   **Enter manually**; the supplied title is searched directly or pre-populated for manual
   entry. A matched movie shows its first five available TMDB posters together for selection.
-  Other types open manual entry with the supplied title already filled in.
+  Manual logging combines optional artwork and the member's log details into one form.
 - Every log can include an optional review, strict 1–5 half-step rating, and optional
   `Month/Day/Year` activity date. New logs default to the current Chicago activity day,
   which changes at 4 AM. The same form defaults to creating a forum post but can save only

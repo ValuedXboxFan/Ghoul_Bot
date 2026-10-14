@@ -85,7 +85,16 @@ def log_embed(
             inline=False,
         )
     if media_log.review:
-        embed.add_field(name="Review", value=media_log.review, inline=False)
+        review_parts = [
+            media_log.review[index : index + 1024]
+            for index in range(0, len(media_log.review), 1024)
+        ]
+        for index, review_part in enumerate(review_parts):
+            embed.add_field(
+                name="Review" if index == 0 else "Review (continued)",
+                value=review_part,
+                inline=False,
+            )
     if artwork_url is not None:
         embed.set_image(url=artwork_url)
 

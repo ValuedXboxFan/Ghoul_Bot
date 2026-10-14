@@ -166,7 +166,7 @@ class MovieLogStartView(OwnedView):
         _button: discord.ui.Button[MovieLogStartView],
     ) -> None:
         await interaction.response.send_modal(
-            ManualMediaModal(MediaDraft(kind="movie", title=self.title), self.dependencies)
+            ManualLogModal(MediaDraft(kind="movie", title=self.title), self.dependencies)
         )
 
 
@@ -267,7 +267,7 @@ class ManualStartView(OwnedView):
         interaction: discord.Interaction,
         _button: discord.ui.Button[ManualStartView],
     ) -> None:
-        await interaction.response.send_modal(ManualMediaModal(self.draft, self.dependencies))
+        await interaction.response.send_modal(ManualLogModal(self.draft, self.dependencies))
 
 
 class MovieLookupSelect(discord.ui.Select[MovieLookupView]):
@@ -419,15 +419,169 @@ class MovieArtworkView(OwnedLayoutView):
         )
 
 
-class ManualMediaModal(discord.ui.Modal):
-    """Collect manual title and optional artwork for new or replacement media."""
+class ManualLogModal(discord.ui.Modal):
+    """Collect manual artwork and member log details in one modal."""
 
     def __init__(
         self,
         draft: MediaDraft,
         dependencies: LogDependencies,
         *,
-        replacement_log_id: int | None = None,
+        initial: LogData | None = None,
+        publish: bool = True,
+    ) -> None:
+        super().__init__(title=f"Log {MEDIA_TYPES[draft.kind].label}"[:45], timeout=600)
+        self.draft = draft
+        self.dependencies = dependencies
+        self.artwork_input: discord.ui.FileUpload[ManualLogModal] = discord.ui.FileUpload(
+            required=False,
+            min_values=0,
+            max_values=1,
+        )
+        self.review_input: discord.ui.TextInput[ManualLogModal] = discord.ui.TextInput(
+            style=discord.TextStyle.paragraph,
+            default=initial.review if initial and initial.review else None,
+            placeholder="What did you think?",
+            required=False,
+            max_length=1800,
+        )
+        self.rating_input: discord.ui.Select[ManualLogModal] = discord.ui.Select(
+            placeholder="Select a rating",
+            options=rating_options(initial.rating if initial else None),
+            min_values=1,
+            max_values=1,
+            required=True,
+        )
+        initial_date = initial.activity_date if initial is not None else default_activity_date()
+        self.date_input: discord.ui.TextInput[ManualLogModal] = discord.ui.TextInput(
+            default=format_activity_date(initial_date) if initial_date else None,
+            placeholder="Month/Day/Year",
+            required=False,
+            max_length=10,
+        )
+        self.publish_input: discord.ui.Select[ManualLogModal] = discord.ui.Select(
+            placeholder="Create a forum post?",
+            options=[
+                discord.SelectOption(label="Yes", value="yes", default=publish),
+                discord.SelectOption(label="No", value="no", default=not publish),
+            ],
+            min_values=1,
+            max_values=1,
+            required=True,
+        )
+        self.add_item(
+            discord.ui.Label(
+                text="Artwork (optional)",
+                description="PNG, JPEG, GIF, or WebP; maximum 5 MB",
+                component=self.artwork_input,
+            )
+        )
+        self.add_item(discord.ui.Label(text="Review (optional)", component=self.review_input))
+        self.add_item(discord.ui.Label(text="Rating (optional)", component=self.rating_input))
+        self.add_item(
+            discord.ui.Label(
+                text="Date (optional)",
+                description="Month/Day/Year; leave blank to record no date",
+                component=self.date_input,
+            )
+        )
+        self.add_item(
+            discord.ui.Label(
+                text="Create forum post?",
+                description="Choose No to save only in your log history",
+                component=self.publish_input,
+            )
+        )
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        try:
+            await self._apply_artwork()
+            log_data = LogData(
+                review=str(self.review_input).strip() or None,
+                rating=selected_rating(self.rating_input),
+                activity_date=parse_activity_date(str(self.date_input)),
+            )
+        except ValueError as error:
+            await interaction.response.send_message(
+                str(error),
+                view=ManualLogRetryView(
+                    interaction.user.id,
+                    self.draft,
+                    self.dependencies,
+                    LogData(
+                        review=str(self.review_input).strip() or None,
+                        rating=selected_rating(self.rating_input),
+                        activity_date=None,
+                    ),
+                    self.publish_input.values[0] == "yes",
+                ),
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        await save_new_log(
+            interaction,
+            self.draft,
+            log_data,
+            self.dependencies,
+            publish=self.publish_input.values[0] == "yes",
+        )
+
+    async def _apply_artwork(self) -> None:
+        if not self.artwork_input.values:
+            return
+        attachment = self.artwork_input.values[0]
+        content_type = attachment.content_type or ""
+        if not content_type.startswith("image/"):
+            raise ValueError("Artwork must be an image file.")
+        if attachment.size > MAX_ARTWORK_BYTES:
+            raise ValueError("Artwork must be 5 MB or smaller.")
+        self.draft.artwork_data = await attachment.read(use_cached=True)
+        self.draft.artwork_content_type = content_type
+        self.draft.artwork_filename = attachment.filename
+
+
+class ManualLogRetryView(OwnedView):
+    def __init__(
+        self,
+        owner_id: int,
+        draft: MediaDraft,
+        dependencies: LogDependencies,
+        initial: LogData,
+        publish: bool,
+    ) -> None:
+        super().__init__(owner_id)
+        self.draft = draft
+        self.dependencies = dependencies
+        self.initial = initial
+        self.publish = publish
+
+    @discord.ui.button(label="Try again", style=discord.ButtonStyle.primary)
+    async def retry(
+        self,
+        interaction: discord.Interaction,
+        _button: discord.ui.Button[ManualLogRetryView],
+    ) -> None:
+        await interaction.response.send_modal(
+            ManualLogModal(
+                self.draft,
+                self.dependencies,
+                initial=self.initial,
+                publish=self.publish,
+            )
+        )
+
+
+class ManualMediaModal(discord.ui.Modal):
+    """Collect a replacement manual title and optional artwork."""
+
+    def __init__(
+        self,
+        draft: MediaDraft,
+        dependencies: LogDependencies,
+        *,
+        replacement_log_id: int,
     ) -> None:
         super().__init__(title=f"{MEDIA_TYPES[draft.kind].label} details"[:45], timeout=600)
         self.draft = draft
@@ -469,14 +623,6 @@ class ManualMediaModal(discord.ui.Modal):
             )
             return
 
-        if self.replacement_log_id is None:
-            await interaction.response.send_message(
-                f"Media details ready for **{self.draft.title}**.",
-                view=ContinueLogView(interaction.user.id, self.draft, self.dependencies),
-                ephemeral=True,
-            )
-            return
-
         await interaction.response.defer(ephemeral=True, thinking=True)
         await replace_media_details(
             interaction,
@@ -508,7 +654,7 @@ class ManualRetryView(OwnedView):
         owner_id: int,
         draft: MediaDraft,
         dependencies: LogDependencies,
-        replacement_log_id: int | None,
+        replacement_log_id: int,
     ) -> None:
         super().__init__(owner_id)
         self.draft = draft
@@ -528,26 +674,6 @@ class ManualRetryView(OwnedView):
                 replacement_log_id=self.replacement_log_id,
             )
         )
-
-
-class ContinueLogView(OwnedView):
-    def __init__(
-        self,
-        owner_id: int,
-        draft: MediaDraft,
-        dependencies: LogDependencies,
-    ) -> None:
-        super().__init__(owner_id)
-        self.draft = draft
-        self.dependencies = dependencies
-
-    @discord.ui.button(label="Add your log details", style=discord.ButtonStyle.primary)
-    async def continue_log(
-        self,
-        interaction: discord.Interaction,
-        _button: discord.ui.Button[ContinueLogView],
-    ) -> None:
-        await interaction.response.send_modal(LogDetailsModal(self.draft, self.dependencies))
 
 
 class LogDetailsModal(discord.ui.Modal):
