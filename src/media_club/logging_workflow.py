@@ -125,13 +125,7 @@ class ForumPublisher:
     ) -> tuple[discord.Thread, discord.Message]:
         """Create a tagged forum post with optional artwork."""
         forum = await self._forum(client)
-        tag_name = MEDIA_TYPES[item.media_type].tag_name
-        tag = next(
-            (tag for tag in forum.available_tags if tag.name.casefold() == tag_name.casefold()),
-            None,
-        )
-        if tag is None:
-            raise ForumConfigurationError(f'The configured forum does not have a "{tag_name}" tag.')
+        tag = self._tag(forum, item)
 
         media_log.media_item = item
         artwork = await self.artwork(media_log, item)
@@ -158,6 +152,48 @@ class ForumPublisher:
                 file=discord.File(io.BytesIO(artwork.data), filename=artwork.filename),
             )
         return created.thread, created.message
+
+    async def update_media_post(
+        self,
+        client: discord.Client,
+        user: discord.User | discord.Member,
+        media_log: MediaLog,
+        item: MediaItem,
+    ) -> None:
+        """Update a forum post's title, tag, artwork, and embed without replacing its thread."""
+        if media_log.forum_thread_id is None or media_log.forum_message_id is None:
+            return
+        forum = await self._forum(client)
+        tag = self._tag(forum, item)
+        channel = client.get_channel(media_log.forum_thread_id)
+        if channel is None:
+            channel = await client.fetch_channel(media_log.forum_thread_id)
+        if not isinstance(channel, discord.Thread):
+            raise ForumConfigurationError("The stored forum thread no longer exists.")
+
+        await channel.edit(
+            name=display_title(item),
+            archived=False,
+            applied_tags=[tag],
+            reason="Owner updated Ghoul Bot media details",
+        )
+        message = await channel.fetch_message(media_log.forum_message_id)
+        media_log.media_item = item
+        artwork = await self.artwork(media_log, item)
+        embed = log_embed(
+            user,
+            media_log,
+            artwork_url=f"attachment://{artwork.filename}" if artwork is not None else None,
+        )
+        attachments: list[discord.Attachment | discord.File] = []
+        if artwork is not None:
+            attachments.append(discord.File(io.BytesIO(artwork.data), filename=artwork.filename))
+        await message.edit(
+            content=log_content(user, media_log),
+            embed=embed,
+            attachments=attachments,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
 
     async def update_log_message(
         self,
@@ -212,3 +248,14 @@ class ForumPublisher:
         if not isinstance(channel, discord.ForumChannel):
             raise ForumConfigurationError("The configured destination is not a forum channel.")
         return channel
+
+    @staticmethod
+    def _tag(forum: discord.ForumChannel, item: MediaItem) -> discord.ForumTag:
+        tag_name = MEDIA_TYPES[item.media_type].tag_name
+        tag = next(
+            (tag for tag in forum.available_tags if tag.name.casefold() == tag_name.casefold()),
+            None,
+        )
+        if tag is None:
+            raise ForumConfigurationError(f'The configured forum does not have a "{tag_name}" tag.')
+        return tag

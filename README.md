@@ -91,7 +91,8 @@ immediately without waiting for global command propagation:
   `Month/Day/Year` activity date. New entries default to the current Chicago activity day,
   which changes at 4 AM.
 - `/edit` and `/delete` operate only inside a registered forum post and only for its
-  registered owner.
+  registered owner. Editing media details updates the existing thread title, tag, artwork,
+  and starter message in place, preserving the thread's discussion and links.
 - `/mylogs` privately browses and edits both forum-posted and private history, newest first,
   with pagination beyond 25 entries.
 - `/about` shows Ghoul Bot's credits and data-source attribution.
