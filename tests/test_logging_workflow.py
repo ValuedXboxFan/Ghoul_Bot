@@ -127,6 +127,67 @@ def test_half_star_rating_display() -> None:
     assert rating_stars(Decimal("3.5")) == "⭐⭐⭐½☆ (3.5)"
 
 
+def test_media_details_update_existing_forum_post_in_place(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    item = MediaItem(
+        id=2,
+        media_type="movie",
+        provider="manual",
+        provider_id=None,
+        title="Alien: The Director's Cut",
+        release_date=None,
+        provider_payload={},
+    )
+    media_log = MediaLog(
+        id=7,
+        media_item_id=1,
+        discord_user_id=42,
+        review="Still terrifying.",
+        rating=Decimal("5.0"),
+        activity_date=None,
+        forum_thread_id=100,
+        forum_message_id=101,
+        media_item=item,
+    )
+    tag = discord.ForumTag(name="Movies")
+    forum = AsyncMock(spec=discord.ForumChannel)
+    forum.available_tags = [tag]
+    message = AsyncMock(spec=discord.Message)
+
+    class FakeThread:
+        def __init__(self) -> None:
+            self.edit = AsyncMock()
+            self.fetch_message = AsyncMock(return_value=message)
+
+    monkeypatch.setattr("media_club.logging_workflow.discord.Thread", FakeThread)
+    thread = FakeThread()
+    client = SimpleNamespace(get_channel=lambda channel_id: thread)
+    publisher = ForumPublisher(99, None)
+    publisher._forum = AsyncMock(return_value=forum)
+    publisher.artwork = AsyncMock(return_value=None)
+
+    asyncio.run(
+        publisher.update_media_post(
+            cast(discord.Client, client),
+            cast(discord.User, FakeUser()),
+            media_log,
+            item,
+        )
+    )
+
+    thread.edit.assert_awaited_once_with(
+        name="Alien: The Director's Cut",
+        archived=False,
+        applied_tags=[tag],
+        reason="Owner updated Ghoul Bot media details",
+    )
+    thread.fetch_message.assert_awaited_once_with(101)
+    message.edit.assert_awaited_once()
+    assert message.edit.await_args.kwargs["attachments"] == []
+    assert message.edit.await_args.kwargs["content"] == "**Logged by <@42>**"
+
+
 def test_opening_next_modal_dismisses_the_completed_prompt() -> None:
     prompt = SimpleNamespace(delete=AsyncMock())
     response = SimpleNamespace(send_modal=AsyncMock())

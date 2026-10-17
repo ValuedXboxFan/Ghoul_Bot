@@ -541,7 +541,7 @@ class ManualMediaModal(discord.ui.Modal):
             return
 
         await interaction.response.defer(ephemeral=True, thinking=True)
-        await replace_media_details(
+        await update_media_details(
             interaction,
             self.replacement_log_id,
             self.draft,
@@ -943,41 +943,8 @@ class EditChoiceView(OwnedView):
         interaction: discord.Interaction,
         _button: discord.ui.Button[EditChoiceView],
     ) -> None:
-        warning = (
-            "Changing media details creates a new forum post. "
-            "The current thread and all of its discussion will be permanently deleted."
-            if self.media_log.forum_thread_id is not None
-            else "Changing media details replaces the title and artwork for this private log."
-        )
-        await interaction.response.send_message(
-            warning,
-            view=MediaEditWarningView(
-                interaction.user.id,
-                self.media_log,
-                self.dependencies,
-            ),
-            ephemeral=True,
-        )
-
-
-class MediaEditWarningView(OwnedView):
-    def __init__(
-        self,
-        owner_id: int,
-        media_log: MediaLog,
-        dependencies: LogDependencies,
-    ) -> None:
-        super().__init__(owner_id)
-        self.media_log = media_log
-        self.dependencies = dependencies
-
-    @discord.ui.button(label="Continue", style=discord.ButtonStyle.danger)
-    async def continue_edit(
-        self,
-        interaction: discord.Interaction,
-        _button: discord.ui.Button[MediaEditWarningView],
-    ) -> None:
-        await interaction.response.send_modal(
+        await open_modal_and_dismiss_prompt(
+            interaction,
             ManualMediaModal(
                 MediaDraft(
                     kind=self.media_log.media_item.media_type,
@@ -985,25 +952,17 @@ class MediaEditWarningView(OwnedView):
                 ),
                 self.dependencies,
                 replacement_log_id=self.media_log.id,
-            )
+            ),
         )
 
-    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
-    async def cancel(
-        self,
-        interaction: discord.Interaction,
-        _button: discord.ui.Button[MediaEditWarningView],
-    ) -> None:
-        await interaction.response.edit_message(content="No changes were made.", view=None)
 
-
-async def replace_media_details(
+async def update_media_details(
     interaction: discord.Interaction,
     log_id: int,
     draft: MediaDraft,
     dependencies: LogDependencies,
 ) -> None:
-    """Replace media details, recreating the forum thread when one exists."""
+    """Update media details while retaining any existing forum thread and discussion."""
     media_log = await dependencies.repository.get_owned_log(log_id, interaction.user.id)
     if media_log is None:
         await interaction.followup.send("You no longer own that log.", ephemeral=True)
@@ -1024,29 +983,20 @@ async def replace_media_details(
             await interaction.followup.send("The media details were updated.", ephemeral=True)
             return
 
-        old_thread_id = media_log.forum_thread_id
-        thread, message = await dependencies.publisher.publish(
+        await dependencies.publisher.update_media_post(
             interaction.client,
             interaction.user,
             media_log,
             item,
         )
-        await dependencies.repository.replace_log_media(
-            media_log.id,
-            item.id,
-            thread_id=thread.id,
-            message_id=message.id,
-        )
-        await dependencies.publisher.delete_thread(interaction.client, old_thread_id)
+        await dependencies.repository.replace_log_media(media_log.id, item.id)
         await interaction.followup.send(
-            f"Created replacement post {thread.mention}. The old thread was deleted.",
+            f"Updated the media details in <#{media_log.forum_thread_id}> without replacing it.",
             ephemeral=True,
         )
     except (discord.HTTPException, ForumConfigurationError, SQLAlchemyError, TmdbError) as error:
-        logger.exception("Could not replace media details")
-        await interaction.followup.send(
-            f"I couldn't replace those details: {error}", ephemeral=True
-        )
+        logger.exception("Could not update media details")
+        await interaction.followup.send(f"I couldn't update those details: {error}", ephemeral=True)
 
 
 class DeleteConfirmationView(OwnedView):
@@ -1152,14 +1102,16 @@ class LogsView(OwnedView):
         if media_log is None:
             await interaction.response.send_message("Choose a log first.", ephemeral=True)
             return
-        await interaction.response.send_message(
-            "This replaces the title and optional artwork for the selected log.",
-            view=MediaEditWarningView(
-                interaction.user.id,
-                media_log,
+        await open_modal_and_dismiss_prompt(
+            interaction,
+            ManualMediaModal(
+                MediaDraft(
+                    kind=media_log.media_item.media_type,
+                    title=media_log.media_item.title,
+                ),
                 self.dependencies,
+                replacement_log_id=media_log.id,
             ),
-            ephemeral=True,
         )
 
     @discord.ui.button(label="Delete", style=discord.ButtonStyle.danger)

@@ -186,17 +186,12 @@ class MediaRepository:
         self,
         log_id: int,
         media_item_id: int,
-        *,
-        thread_id: int | None = None,
-        message_id: int | None = None,
     ) -> MediaLog:
-        """Point a log at replacement media and optional replacement forum post."""
+        """Point a log at replacement media while preserving its forum-post identity."""
         async with self.database.sessions() as session:
             media_log = await self._load_log(session, log_id)
             media_log.media_item_id = media_item_id
             media_log.poster_path = None
-            media_log.forum_thread_id = thread_id
-            media_log.forum_message_id = message_id
             await session.commit()
             return await self._load_log(session, log_id)
 
