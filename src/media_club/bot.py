@@ -1,8 +1,11 @@
+import asyncio
+import io
 import logging
 from typing import cast
 
 import discord
 from discord import app_commands
+from sqlalchemy.exc import SQLAlchemyError
 
 from media_club.config import Settings
 from media_club.database import Database
@@ -19,7 +22,13 @@ from media_club.logging_workflow import ForumPublisher, MediaDraft
 from media_club.media_types import MEDIA_TYPES, MediaKind
 from media_club.models import MediaLog
 from media_club.repositories import MediaRepository
+from media_club.season import (
+    active_season,
+    closed_season_message,
+    season_is_editable,
+)
 from media_club.tmdb import TmdbClient
+from media_club.wrapup import render_wrapup
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +120,13 @@ class GhoulBot(discord.Client):
             *,
             publish: bool,
         ) -> None:
+            if active_season() is None:
+                await interaction.response.send_message(
+                    "Logging is closed. The next season opens September 28 and runs through "
+                    "November 7.",
+                    ephemeral=True,
+                )
+                return
             clean_title = title.strip()
             media_kind = cast(MediaKind, media_type.value)
             if media_kind == "movie":
@@ -166,6 +182,56 @@ class GhoulBot(discord.Client):
         ) -> None:
             await start_log_workflow(interaction, media_type, title, publish=True)
 
+        @self.tree.command(name="wrapup", description="Generate your Ghoulstober season wrap-up")
+        @app_commands.guilds(self.guild)
+        @app_commands.describe(year="Season year; defaults to your latest logged season")
+        async def wrapup(interaction: discord.Interaction, year: int | None = None) -> None:
+            if year is not None and not 2000 <= year <= 9999:
+                await interaction.response.send_message(
+                    "Choose a four-digit season year.", ephemeral=True
+                )
+                return
+            await interaction.response.defer(thinking=True)
+            try:
+                season_year = year or await self.media_repository.latest_season_year(
+                    interaction.user.id
+                )
+                if season_year is None:
+                    await interaction.followup.send("You don't have any logs to summarize yet.")
+                    return
+                counts = await self.media_repository.season_media_counts(
+                    interaction.user.id,
+                    season_year,
+                )
+            except SQLAlchemyError as error:
+                logger.exception("Could not load wrap-up statistics")
+                await interaction.followup.send(f"I couldn't load your wrap-up: {error}")
+                return
+            if not counts:
+                await interaction.followup.send(
+                    f"You don't have any logs in the {season_year} season."
+                )
+                return
+
+            avatar_data: bytes | None = None
+            try:
+                avatar_data = await interaction.user.display_avatar.read()
+            except discord.HTTPException:
+                logger.warning("Could not download avatar for wrap-up", exc_info=True)
+            image = await asyncio.to_thread(
+                render_wrapup,
+                interaction.user.display_name,
+                season_year,
+                counts,
+                avatar_data,
+            )
+            await interaction.followup.send(
+                file=discord.File(
+                    io.BytesIO(image),
+                    filename=f"ghoulstober-{season_year}-wrapup.png",
+                )
+            )
+
         @self.tree.command(name="about", description="View Ghoul Bot credits and data sources")
         @app_commands.guilds(self.guild)
         async def about(interaction: discord.Interaction) -> None:
@@ -199,6 +265,11 @@ class GhoulBot(discord.Client):
             if media_log.discord_user_id != interaction.user.id:
                 await interaction.response.send_message(
                     "Only the registered owner can manage this log.", ephemeral=True
+                )
+                return None
+            if not season_is_editable(media_log.season_year):
+                await interaction.response.send_message(
+                    closed_season_message(media_log.season_year), ephemeral=True
                 )
                 return None
             return media_log

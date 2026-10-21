@@ -3,9 +3,8 @@ from __future__ import annotations
 import logging
 from contextlib import suppress
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date
 from decimal import Decimal
-from zoneinfo import ZoneInfo
 
 import discord
 from sqlalchemy.exc import SQLAlchemyError
@@ -20,12 +19,20 @@ from media_club.logging_workflow import (
 from media_club.media_types import MEDIA_TYPES
 from media_club.models import MediaItem, MediaLog
 from media_club.repositories import MediaRepository
+from media_club.season import (
+    Season,
+    SeasonClosedError,
+    closed_season_message,
+    default_activity_date,
+    season_is_editable,
+    validate_activity_date,
+    validate_new_log_date,
+)
 from media_club.tmdb import TMDB_IMAGE_URL, TmdbClient, TmdbError, TmdbMovie
 
 logger = logging.getLogger(__name__)
 
 RATINGS = tuple(Decimal(value) / 2 for value in range(2, 11))
-ACTIVITY_TIMEZONE = ZoneInfo("America/Chicago")
 LOGS_PAGE_SIZE = 25
 
 
@@ -55,12 +62,6 @@ def rating_options(selected: Decimal | None = None) -> list[discord.SelectOption
             for rating in RATINGS
         ],
     ]
-
-
-def default_activity_date(now: datetime | None = None) -> date:
-    """Return the server's activity day, whose boundary is 4 AM Chicago time."""
-    local_now = now.astimezone(ACTIVITY_TIMEZONE) if now else datetime.now(ACTIVITY_TIMEZONE)
-    return (local_now - timedelta(hours=4)).date()
 
 
 def format_activity_date(value: date) -> str:
@@ -719,14 +720,19 @@ class LogDetailsModal(discord.ui.Modal):
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         try:
+            activity_date = parse_activity_date(str(self.date_input))
+            validate_new_log_date(activity_date)
             log_data = LogData(
                 review=str(self.review_input).strip() or None,
                 rating=selected_rating(self.rating_input),
-                activity_date=parse_activity_date(str(self.date_input)),
+                activity_date=activity_date,
             )
-        except ValueError:
+        except SeasonClosedError as error:
+            await interaction.response.send_message(str(error), ephemeral=True)
+            return
+        except ValueError as error:
             await interaction.response.send_message(
-                "Enter a real date as `Month/Day/Year`, such as `10/14/2026` or `10/14/26`.",
+                f"{error} Use `Month/Day/Year`, such as `10/14/2026` or `10/14/26`.",
                 view=LogDetailsRetryView(
                     interaction.user.id,
                     self.draft,
@@ -794,6 +800,12 @@ async def save_new_log(
 ) -> None:
     """Persist a validated log and optionally create its forum thread."""
     try:
+        season_year = validate_new_log_date(log_data.activity_date)
+    except ValueError as error:
+        await interaction.followup.send(str(error), ephemeral=True)
+        return
+
+    try:
         item = await persist_draft(dependencies, draft)
         media_log = await dependencies.repository.create_log(
             item.id,
@@ -801,6 +813,7 @@ async def save_new_log(
             review=log_data.review,
             rating=log_data.rating,
             activity_date=log_data.activity_date,
+            season_year=season_year,
             poster_path=draft.selected_poster_path,
         )
     except SQLAlchemyError as error:
@@ -900,6 +913,16 @@ class EditLogModal(discord.ui.Modal):
         if owned is None:
             await interaction.followup.send("You no longer own that log.", ephemeral=True)
             return
+        if not season_is_editable(owned.season_year):
+            await interaction.followup.send(
+                closed_season_message(owned.season_year), ephemeral=True
+            )
+            return
+        try:
+            validate_activity_date(activity_date, Season(owned.season_year))
+        except ValueError as error:
+            await interaction.followup.send(str(error), ephemeral=True)
+            return
         try:
             updated = await self.dependencies.repository.update_log_data(
                 self.log_id,
@@ -935,6 +958,11 @@ class EditChoiceView(OwnedView):
         interaction: discord.Interaction,
         _button: discord.ui.Button[EditChoiceView],
     ) -> None:
+        if not season_is_editable(self.media_log.season_year):
+            await interaction.response.send_message(
+                closed_season_message(self.media_log.season_year), ephemeral=True
+            )
+            return
         await interaction.response.send_modal(EditLogModal(self.media_log, self.dependencies))
 
     @discord.ui.button(label="Media details", style=discord.ButtonStyle.secondary)
@@ -943,6 +971,11 @@ class EditChoiceView(OwnedView):
         interaction: discord.Interaction,
         _button: discord.ui.Button[EditChoiceView],
     ) -> None:
+        if not season_is_editable(self.media_log.season_year):
+            await interaction.response.send_message(
+                closed_season_message(self.media_log.season_year), ephemeral=True
+            )
+            return
         await open_modal_and_dismiss_prompt(
             interaction,
             ManualMediaModal(
@@ -966,6 +999,11 @@ async def update_media_details(
     media_log = await dependencies.repository.get_owned_log(log_id, interaction.user.id)
     if media_log is None:
         await interaction.followup.send("You no longer own that log.", ephemeral=True)
+        return
+    if not season_is_editable(media_log.season_year):
+        await interaction.followup.send(
+            closed_season_message(media_log.season_year), ephemeral=True
+        )
         return
 
     try:
@@ -1024,6 +1062,11 @@ class DeleteConfirmationView(OwnedView):
         if owned is None:
             await interaction.response.edit_message(
                 content="That log no longer exists or is not yours.", view=None
+            )
+            return
+        if not season_is_editable(owned.season_year):
+            await interaction.response.edit_message(
+                content=closed_season_message(owned.season_year), view=None
             )
             return
         await interaction.response.edit_message(content="Deleting the post and log…", view=None)
@@ -1090,6 +1133,11 @@ class LogsView(OwnedView):
         if media_log is None:
             await interaction.response.send_message("Choose a log first.", ephemeral=True)
             return
+        if not season_is_editable(media_log.season_year):
+            await interaction.response.send_message(
+                closed_season_message(media_log.season_year), ephemeral=True
+            )
+            return
         await interaction.response.send_modal(EditLogModal(media_log, self.dependencies))
 
     @discord.ui.button(label="Edit media", style=discord.ButtonStyle.secondary)
@@ -1101,6 +1149,11 @@ class LogsView(OwnedView):
         media_log = self.selected()
         if media_log is None:
             await interaction.response.send_message("Choose a log first.", ephemeral=True)
+            return
+        if not season_is_editable(media_log.season_year):
+            await interaction.response.send_message(
+                closed_season_message(media_log.season_year), ephemeral=True
+            )
             return
         await open_modal_and_dismiss_prompt(
             interaction,
@@ -1123,6 +1176,11 @@ class LogsView(OwnedView):
         media_log = self.selected()
         if media_log is None:
             await interaction.response.send_message("Choose a log first.", ephemeral=True)
+            return
+        if not season_is_editable(media_log.season_year):
+            await interaction.response.send_message(
+                closed_season_message(media_log.season_year), ephemeral=True
+            )
             return
         await interaction.response.send_message(
             "This permanently removes the item from your log history. Continue?",
