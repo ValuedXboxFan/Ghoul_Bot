@@ -19,6 +19,11 @@ from media_club.logging_workflow import ForumPublisher, MediaDraft
 from media_club.media_types import MEDIA_TYPES, MediaKind
 from media_club.models import MediaLog
 from media_club.repositories import MediaRepository
+from media_club.season import (
+    active_season,
+    closed_season_message,
+    season_is_editable,
+)
 from media_club.tmdb import TmdbClient
 
 logger = logging.getLogger(__name__)
@@ -111,6 +116,13 @@ class GhoulBot(discord.Client):
             *,
             publish: bool,
         ) -> None:
+            if active_season() is None:
+                await interaction.response.send_message(
+                    "Logging is closed. The next season opens September 28 and runs through "
+                    "November 7.",
+                    ephemeral=True,
+                )
+                return
             clean_title = title.strip()
             media_kind = cast(MediaKind, media_type.value)
             if media_kind == "movie":
@@ -199,6 +211,11 @@ class GhoulBot(discord.Client):
             if media_log.discord_user_id != interaction.user.id:
                 await interaction.response.send_message(
                     "Only the registered owner can manage this log.", ephemeral=True
+                )
+                return None
+            if not season_is_editable(media_log.season_year):
+                await interaction.response.send_message(
+                    closed_season_message(media_log.season_year), ephemeral=True
                 )
                 return None
             return media_log

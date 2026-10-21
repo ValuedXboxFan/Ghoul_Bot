@@ -90,6 +90,10 @@ immediately without waiting for global command propagation:
 - Every ledger entry can include an optional review, strict 1–5 half-step rating, and optional
   `Month/Day/Year` activity date. New entries default to the current Chicago activity day,
   which changes at 4 AM.
+- Each Ghoulstober season accepts `/log` and `/post` submissions from September 28 through
+  November 7. Activity dates are limited to September 28 through October 31; the November
+  window is a grace period for recording October activity. After November 7, that season's
+  entries become read-only and cannot be added, edited, or deleted.
 - `/edit` and `/delete` operate only inside a registered forum post and only for its
   registered owner. Editing media details updates the existing thread title, tag, artwork,
   and starter message in place, preserving the thread's discussion and links.
@@ -111,8 +115,8 @@ Provider-backed media is normalized separately from member activity:
 
 - `media_items` stores one shared item for each `(provider, provider_id)` pair, including the
   canonical title and TMDB ID.
-- `media_logs` stores each member's individual date, rating, review, selected poster, and forum
-  post identifiers, referencing the shared item through `media_item_id`.
+- `media_logs` stores each member's season, optional activity date, rating, review, selected
+  poster, and forum post identifiers, referencing the shared item through `media_item_id`.
 
 This lets multiple members log the same TMDB movie without duplicating its identity, while
 preserving independent watches and presentation choices. The indexed relationship supports

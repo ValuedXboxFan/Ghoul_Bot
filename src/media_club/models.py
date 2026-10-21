@@ -101,6 +101,7 @@ class MediaLog(Base):
     review: Mapped[str | None] = mapped_column(Text())
     rating: Mapped[Decimal | None] = mapped_column(Numeric(2, 1))
     activity_date: Mapped[date | None] = mapped_column(Date())
+    season_year: Mapped[int] = mapped_column(nullable=False, index=True)
     poster_path: Mapped[str | None] = mapped_column(String(255))
     forum_thread_id: Mapped[int | None] = mapped_column(BigInteger, unique=True)
     forum_message_id: Mapped[int | None] = mapped_column(BigInteger)

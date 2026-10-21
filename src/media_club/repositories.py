@@ -88,6 +88,7 @@ class MediaRepository:
         review: str | None,
         rating: Decimal | None,
         activity_date: date | None,
+        season_year: int,
         poster_path: str | None = None,
     ) -> MediaLog:
         """Create a member-owned log record without assuming a forum post."""
@@ -98,6 +99,7 @@ class MediaRepository:
                 review=review,
                 rating=rating,
                 activity_date=activity_date,
+                season_year=season_year,
                 poster_path=poster_path,
             )
             session.add(media_log)
