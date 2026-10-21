@@ -254,6 +254,7 @@ def test_modal_layouts_and_command_tree_construct() -> None:
         "about",
         "log",
         "post",
+        "wrapup",
         "edit",
         "delete",
         "mylogs",
@@ -280,6 +281,10 @@ def test_modal_layouts_and_command_tree_construct() -> None:
     assert isinstance(post_command, discord.app_commands.Command)
     assert [parameter.name for parameter in post_command.parameters] == ["media_type", "title"]
     assert all(parameter.required for parameter in post_command.parameters)
+    wrapup_command = next(command for command in commands if command.name == "wrapup")
+    assert isinstance(wrapup_command, discord.app_commands.Command)
+    assert [parameter.name for parameter in wrapup_command.parameters] == ["year"]
+    assert not wrapup_command.parameters[0].required
 
 
 def test_movie_artwork_gallery_is_limited_to_first_five_posters() -> None:

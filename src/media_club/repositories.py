@@ -3,7 +3,7 @@ from decimal import Decimal
 from typing import cast
 from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
@@ -166,6 +166,36 @@ class MediaRepository:
                 .limit(limit)
             )
             return list(result.unique())
+
+    async def latest_season_year(self, discord_user_id: int) -> int | None:
+        """Return the newest season in which a member has at least one log."""
+        async with self.database.sessions() as session:
+            return cast(
+                int | None,
+                await session.scalar(
+                    select(func.max(MediaLog.season_year)).where(
+                        MediaLog.discord_user_id == discord_user_id
+                    )
+                ),
+            )
+
+    async def season_media_counts(
+        self,
+        discord_user_id: int,
+        season_year: int,
+    ) -> dict[MediaKind, int]:
+        """Count a member's season logs by normalized media type."""
+        async with self.database.sessions() as session:
+            rows = await session.execute(
+                select(MediaItem.media_type, func.count(MediaLog.id))
+                .join(MediaLog, MediaLog.media_item_id == MediaItem.id)
+                .where(
+                    MediaLog.discord_user_id == discord_user_id,
+                    MediaLog.season_year == season_year,
+                )
+                .group_by(MediaItem.media_type)
+            )
+            return {media_type: int(count) for media_type, count in rows.tuples()}
 
     async def update_log_data(
         self,
